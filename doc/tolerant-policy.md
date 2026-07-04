@@ -1,8 +1,8 @@
-# Tolerant Knots — Technical Policy V1
+# Bitcoin Tolerant — Technical Policy V1
 
 ## Summary
 
-Tolerant Knots implements a three-layer policy:
+Bitcoin Tolerant implements a three-layer policy:
 
 | Layer | Behavior |
 |-------|----------|
@@ -33,7 +33,7 @@ Set `tolerant=0` to disable the profile without changing other settings.
 
 ## RDTS / BIP110
 
-Tolerant Knots builds should use:
+Bitcoin Tolerant builds should use:
 
 ```bash
 cmake -DRDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT ...
@@ -86,6 +86,6 @@ cmake --build build
 
 ## Attribution
 
-Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
+Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
 
-Tolerant Knots is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
+Bitcoin Tolerant is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.

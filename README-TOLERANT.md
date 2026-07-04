@@ -1,8 +1,12 @@
-# Tolerant Knots
+# Bitcoin Tolerant
 
 **Strict in relay. Conservative in mining. Tolerant in consensus.**
 
-Tolerant Knots is a conservative Bitcoin node policy built on [Bitcoin Knots](https://bitcoinknots.org/). It helps operators run stricter relay and mining rules without creating a hard fork or rejecting valid blocks on the most-work chain.
+Bitcoin Tolerant is a conservative Bitcoin node policy implemented as an independent fork of [Bitcoin Knots](https://bitcoinknots.org/). It helps operators run stricter relay and mining rules without creating a hard fork or rejecting valid blocks on the most-work chain.
+
+Upstream reference (read-only): [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin)
+
+Project home: https://github.com/HansLove/bitcoin-tolerant
 
 ## Philosophy
 
@@ -14,9 +18,9 @@ Tolerant Knots is a conservative Bitcoin node policy built on [Bitcoin Knots](ht
 
 ## Attribution
 
-Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
+Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
 
-Tolerant Knots is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
+Bitcoin Tolerant is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
 
 ## Build
 
@@ -25,7 +29,7 @@ cmake -B build -DRDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT
 cmake --build build
 ```
 
-`RDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT` disables BIP110/RDTS consensus enforcement by default, matching the Tolerant V1 philosophy. Operators may opt in with `consensusrules=rdts` in `bitcoin.conf`.
+`RDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT` disables BIP110/RDTS consensus enforcement by default, matching the V1 philosophy. Operators may opt in with `consensusrules=rdts` in `bitcoin.conf`.
 
 ## Default configuration
 

@@ -1,87 +1,47 @@
-Tolerant Knots
+Bitcoin Tolerant
 ================
 
-Tolerant Knots is a conservative Bitcoin node policy built on Bitcoin Knots.
-See [README-TOLERANT.md](README-TOLERANT.md) and [doc/tolerant-policy.md](doc/tolerant-policy.md).
+**Strict in relay. Conservative in mining. Tolerant in consensus.**
 
-Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core.
-Tolerant Knots is an independent project and is not affiliated with or endorsed by
-Bitcoin Core or Bitcoin Knots maintainers.
+Bitcoin Tolerant is an independent Bitcoin full-node implementation with a conservative relay and mining policy. It is a fork of [Bitcoin Knots](https://bitcoinknots.org/) (which derives from Bitcoin Core), not a contribution or variant intended to merge back upstream.
 
-https://bitcoinknots.org
+Repository: https://github.com/HansLove/bitcoin-tolerant
 
-For an immediately usable, binary version of the Bitcoin Knots software, see
-the website.
+## Philosophy
 
-What is Bitcoin Knots?
-----------------------
+- **Relay:** Reject or avoid relaying transactions with excessive arbitrary data (OP_RETURN and related carriers).
+- **Mining:** Exclude those transactions from locally generated block templates.
+- **Consensus:** Accept any block that is valid under Bitcoin consensus and on the most-work chain.
 
-Bitcoin Knots connects to the Bitcoin peer-to-peer network to download and fully
-validate blocks and transactions. It also includes a wallet and graphical user
-interface, which can be optionally built.
+**Prefer clean blocks in a tie. Follow the most-work valid chain once the tie is broken.**
 
-Further information about Bitcoin Knots is available in the [doc folder](/doc).
+## Attribution
 
-License
--------
+Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
 
-Bitcoin Knots is released under the terms of the MIT license. See [COPYING](COPYING) for more
-information or see https://opensource.org/licenses/MIT.
+Bitcoin Tolerant is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
 
-Development Process
--------------------
+## Build
 
-Development generally takes place as part of [Bitcoin Core](https://github.com/bitcoin/bitcoin), and is merged into
-Knots for each release.
+```bash
+cmake -B build -DRDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT
+cmake --build build
+```
 
-Even if your pull request to Core is closed, or if your feature is not
-suitable for Core (eg, because it builds on a feature not supported in Core;
-relies on centralised services; etc), it may still be eligible for inclusion
-in Bitcoin Knots. In this case, a pull request may be opened on the
-[Knots GitHub](https://github.com/bitcoinknots/bitcoin) for review and consideration.
-When accepted, you are expected to maintain the submitted branch in your own
-repository, and it will be automatically merged into new releases of Knots.
+Binaries remain `bitcoind`, `bitcoin-cli`, and `bitcoin-qt` for compatibility. The client identifies itself as **Bitcoin Tolerant** in the GUI, logs, and about dialog.
 
-Developer IRC can be found on Freenode at #bitcoin-dev.
+## Documentation
 
-Testing
--------
+- [README-TOLERANT.md](README-TOLERANT.md) — project overview
+- [doc/tolerant-policy.md](doc/tolerant-policy.md) — Technical Policy V1
+- [contrib/tolerant.conf.example](contrib/tolerant.conf.example) — example configuration
 
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
+## Tests
 
-### Automated Testing
+```bash
+build/test/functional/test_runner.py feature_tolerant_policy.py
+```
 
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled during the generation of the build system) with: `ctest`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
+## License
 
-There are also [regression and integration tests](/test), written
-in Python.
-These tests can be run (if the [test dependencies](/test) are installed) with: `build/test/functional/test_runner.py`
-(assuming `build` is your build directory).
-
-The CI (Continuous Integration) systems make sure that every pull request is built for Windows, Linux, and macOS,
-and that unit/sanity tests are run automatically.
-
-### Manual Quality Assurance (QA) Testing
-
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
-
-Translations
-------------
-
-Changes to translations as well as new translations can be submitted to
-[Bitcoin Core's Transifex page](https://explore.transifex.com/bitcoin/bitcoin/).
-
-Translations are periodically pulled from Transifex and merged into the git repository. See the
-[translation process](doc/translation_process.md) for details on how this works.
-
-**Important**: We do not accept translation changes as GitHub pull requests because the next
-pull from Transifex would automatically overwrite them again.
+Released under the MIT license. See [COPYING](COPYING).

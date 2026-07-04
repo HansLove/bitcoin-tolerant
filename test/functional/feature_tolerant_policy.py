@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 The Tolerant Knots developers
+# Copyright (c) 2026 The Bitcoin Tolerant developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test Tolerant Knots relay, mining template, and consensus-tolerant behavior."""

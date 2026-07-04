@@ -69,11 +69,12 @@ std::string FormatSubVersion(const std::string& name, int nClientVersion, const 
     if (!comments.empty()) comments_str = strprintf("(%s)", Join(comments, "; "));
     std::string ua = strprintf("/%s:%s%s/", name, FormatVersion(nClientVersion), comments_str);
     if (!base_name_only) {
-        static const auto ua_knots = []() -> std::string {
-            const auto pos{CLIENT_BUILD.find(".knots")};
-            return "Knots:" + CLIENT_BUILD.substr(pos + 6) + "/";
+        static const auto ua_tolerant = []() -> std::string {
+            const auto pos{CLIENT_BUILD.find(".tolerant")};
+            if (pos == std::string::npos) return {};
+            return "Tolerant:" + CLIENT_BUILD.substr(pos + 9) + "/";
         }();
-        ua += ua_knots;
+        ua += ua_tolerant;
     }
     return ua;
 }
@@ -92,7 +93,7 @@ std::string CopyrightHolders(const std::string& strPrefix)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/bitcoinknots/bitcoin>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/HansLove/bitcoin-tolerant>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR).translated + " ") + "\n" +
            "\n" +
@@ -104,9 +105,9 @@ std::string LicenseInfo()
            strprintf(_("The source code is available from %s."), URL_SOURCE_CODE).translated +
            "\n" +
            "\n" +
-           _("Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core.") + "\n" +
+           _("Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core.") + "\n" +
            _("Bitcoin Knots and Bitcoin Core are released under the MIT License.") + "\n" +
-           _("Tolerant Knots is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.") + "\n" +
+           _("Bitcoin Tolerant is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.") + "\n" +
            "\n" +
            _("This is experimental software.") + "\n" +
            strprintf(_("Distributed under the MIT software license, see the accompanying file %s or %s"), "COPYING", "<https://opensource.org/licenses/MIT>").translated +
