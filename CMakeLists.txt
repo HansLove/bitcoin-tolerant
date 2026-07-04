@@ -55,7 +55,7 @@ set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
 project(BitcoinCore
   VERSION ${CLIENT_VERSION_MAJOR}.${CLIENT_VERSION_MINOR}.${CLIENT_VERSION_BUILD}
   DESCRIPTION "Bitcoin Tolerant node software"
-  HOMEPAGE_URL "https://github.com/HansLove/bitcoin-tolerant"
+  HOMEPAGE_URL "https://bitcointolerant.com"
   LANGUAGES NONE
 )
 

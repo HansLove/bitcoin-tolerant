@@ -1,46 +1,45 @@
-# Bitcoin Tolerant
+# Bitcoin Tolerant — Project Overview
 
-**Strict in relay. Conservative in mining. Tolerant in consensus.**
+**Website:** [bitcointolerant.com](https://bitcointolerant.com)  
+**Source code:** [github.com/HansLove/bitcoin-tolerant](https://github.com/HansLove/bitcoin-tolerant)
 
-Bitcoin Tolerant is a conservative Bitcoin node policy implemented as an independent fork of [Bitcoin Knots](https://bitcoinknots.org/). It helps operators run stricter relay and mining rules without creating a hard fork or rejecting valid blocks on the most-work chain.
+This repository contains the **Bitcoin Tolerant** full node — an independent fork of [Bitcoin Knots](https://bitcoinknots.org/) implementing Technical Policy V1.
 
-Upstream reference (read-only): [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin)
-
-Project home: https://github.com/HansLove/bitcoin-tolerant
+For the primary introduction, quick start, and links, see **[README.md](README.md)**.
 
 ## Philosophy
 
-- **Relay:** Reject or avoid relaying transactions with excessive arbitrary data (OP_RETURN and related carriers).
+**Strict in relay. Conservative in mining. Tolerant in consensus.**
+
+- **Relay:** Reject or avoid relaying transactions with excessive arbitrary data.
 - **Mining:** Exclude those transactions from locally generated block templates.
-- **Consensus:** Accept any block that is valid under Bitcoin consensus and on the most-work chain.
+- **Consensus:** Accept any block valid under Bitcoin consensus on the most-work chain.
 
 **Prefer clean blocks in a tie. Follow the most-work valid chain once the tie is broken.**
 
+## Technical Policy V1
+
+Full specification: [doc/tolerant-policy.md](doc/tolerant-policy.md)
+
+V1 focuses on:
+
+1. Conservative default configuration (`-tolerant=1`)
+2. Mempool / relay policy and logging
+3. Mining template filtering
+4. Clean-block scoring (observation only)
+5. Documentation and regtest coverage
+
+V1 explicitly does **not** change Bitcoin consensus rules, override proof-of-work chain selection, or enforce BIP110/RDTS by default.
+
+## Build flag
+
+Tolerant builds use:
+
+```bash
+cmake -DRDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT ...
+```
+
 ## Attribution
 
-Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core. Bitcoin Knots and Bitcoin Core are released under the MIT License.
-
-Bitcoin Tolerant is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
-
-## Build
-
-```bash
-cmake -B build -DRDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT
-cmake --build build
-```
-
-`RDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT` disables BIP110/RDTS consensus enforcement by default, matching the V1 philosophy. Operators may opt in with `consensusrules=rdts` in `bitcoin.conf`.
-
-## Default configuration
-
-See [contrib/tolerant.conf.example](contrib/tolerant.conf.example) and [doc/tolerant-policy.md](doc/tolerant-policy.md).
-
-## Tests
-
-```bash
-build/test/functional/test_runner.py feature_tolerant_policy.py
-```
-
-## Further reading
-
-- [doc/tolerant-policy.md](doc/tolerant-policy.md) — full V1 policy specification
+Bitcoin Tolerant is derived from Bitcoin Knots, which is derived from Bitcoin Core.  
+MIT License. Not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.
