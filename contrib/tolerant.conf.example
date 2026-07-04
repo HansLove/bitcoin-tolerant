@@ -1,0 +1,27 @@
+# Tolerant Knots example configuration
+#
+# Strict in relay. Conservative in mining. Tolerant in consensus.
+
+# Enable the Tolerant policy profile (default: 1)
+tolerant=1
+
+# Arbitrary-data policy limit in bytes (default: 83)
+tolerantdatacarriersize=83
+
+# Log policy decisions; use with -debug=tolerant (default: 1)
+tolerantlogpolicy=1
+
+# Exclude policy-violating transactions from local block templates (default: 1)
+tolerantminingfilter=1
+
+# Equal-work clean-block preference (default: 0; V1 logs only)
+toleranttiepreference=0
+
+# Optional: opt in to RDTS/BIP110 consensus enforcement (off by default in Tolerant builds)
+# consensusrules=rdts
+
+# Underlying Knots relay options (soft-set by tolerant=1 when not overridden)
+# datacarrier=1
+# datacarriersize=83
+# datacarrierfullcount=1
+# permitbaredatacarrier=0

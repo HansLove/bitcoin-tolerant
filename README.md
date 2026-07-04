@@ -1,5 +1,12 @@
-Bitcoin Knots
-=============
+Tolerant Knots
+================
+
+Tolerant Knots is a conservative Bitcoin node policy built on Bitcoin Knots.
+See [README-TOLERANT.md](README-TOLERANT.md) and [doc/tolerant-policy.md](doc/tolerant-policy.md).
+
+Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core.
+Tolerant Knots is an independent project and is not affiliated with or endorsed by
+Bitcoin Core or Bitcoin Knots maintainers.
 
 https://bitcoinknots.org
 

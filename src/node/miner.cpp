@@ -17,6 +17,7 @@
 #include <deploymentstatus.h>
 #include <logging.h>
 #include <node/context.h>
+#include <node/tolerant.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
 #include <pow.h>
@@ -176,11 +177,14 @@ std::shared_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
+    CCoinsViewCache template_view(&m_chainstate.CoinsTip());
+    m_template_view = &template_view;
     if (m_mempool) {
         LOCK(m_mempool->cs);
         addPriorityTxs(*m_mempool, nPackagesSelected);
         addPackageTxs(*m_mempool, nPackagesSelected, nDescendantsUpdated);
     }
+    m_template_view = nullptr;
 
     const auto time_1{SteadyClock::now()};
 
@@ -255,11 +259,28 @@ bool BlockAssembler::TestPackage(uint64_t packageSize, int64_t packageSigOpsCost
     return true;
 }
 
+bool BlockAssembler::PassesTolerantMiningFilter(const CTransaction& tx) const
+{
+    if (!IsTolerantMiningFilterEnabled() || !m_template_view) return true;
+    const size_t limit = GetTolerantDatacarrierPolicyLimit();
+    if (TxExceedsTolerantDatacarrierPolicy(tx, *m_template_view, limit)) {
+        const auto dcb = DatacarrierBytes(tx, *m_template_view);
+        TolerantLogTemplateExclusion(tx.GetHash(), dcb.first + dcb.second, limit);
+        return false;
+    }
+    return true;
+}
+
 // Perform transaction-level checks before adding to block:
 // - transaction finality (locktime)
 // - serialized size (in case -blockmaxsize is in use)
 bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& package) const
 {
+    for (CTxMemPool::txiter it : package) {
+        if (!PassesTolerantMiningFilter(it->GetTx())) {
+            return false;
+        }
+    }
     uint64_t nPotentialBlockSize = nBlockSize; // only used with fNeedSizeAccounting
     for (CTxMemPool::txiter it : package) {
         if (!IsFinalTx(it->GetTx(), nHeight, m_lock_time_cutoff)) {

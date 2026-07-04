@@ -25,6 +25,7 @@
 class ArgsManager;
 class CBlockIndex;
 class CChainParams;
+class CCoinsViewCache;
 class CScript;
 class Chainstate;
 class ChainstateManager;
@@ -174,6 +175,8 @@ private:
     int lastFewTxs;
     bool blockFinished;
 
+    CCoinsViewCache* m_template_view{nullptr};
+
 public:
     using Options = BlockCreateOptions;
 
@@ -221,6 +224,8 @@ private:
       * These checks should always succeed, and they're here
       * only as an extra check in case of suboptimal node configuration */
     bool TestPackageTransactions(const CTxMemPool::setEntries& package) const;
+    /** Reject transactions that exceed the Tolerant datacarrier policy from local templates. */
+    bool PassesTolerantMiningFilter(const CTransaction& tx) const;
     /** Sort the package in an order that is valid to appear in a block */
     void SortForBlock(const CTxMemPool::setEntries& package, std::vector<CTxMemPool::txiter>& sortedEntries);
 };

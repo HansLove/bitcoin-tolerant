@@ -279,6 +279,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/peerman_args.cpp
   node/psbt.cpp
   node/timeoffsets.cpp
+  node/tolerant.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txreconciliation.cpp

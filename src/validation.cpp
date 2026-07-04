@@ -34,6 +34,7 @@
 #include <logging.h>
 #include <logging/timer.h>
 #include <node/blockstorage.h>
+#include <node/tolerant.h>
 #include <node/utxo_snapshot.h>
 #include <policy/coin_age_priority.h>
 #include <policy/ephemeral_policy.h>
@@ -852,6 +853,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
     if (m_pool.m_opts.require_standard && !IsStandardTx(tx, m_pool.m_opts, reason, ignore_rejects)) {
+        TolerantLogMempoolRejectionIfDatacarrier(tx, m_view, reason);
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
     }
 
@@ -1033,9 +1035,11 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     if (m_pool.m_opts.datacarrier_fullcount || !m_pool.m_opts.accept_non_std_datacarrier) {
         const auto dcb = DatacarrierBytes(tx, m_view);
         if (dcb.second > 0 && !(m_pool.m_opts.accept_non_std_datacarrier || ignore_rejects.count("txn-datacarrier-nonstandard"))) {
+            TolerantLogMempoolRejectionIfDatacarrier(tx, m_view, "txn-datacarrier-nonstandard");
             return state.Invalid(TxValidationResult::TX_INPUTS_NOT_STANDARD, "txn-datacarrier-nonstandard");
         }
         if (m_pool.m_opts.datacarrier_fullcount && (!ignore_rejects.count("txn-datacarrier-exceeded")) && dcb.first + dcb.second > m_pool.m_opts.max_datacarrier_bytes.value_or(0)) {
+            TolerantLogMempoolRejectionIfDatacarrier(tx, m_view, "txn-datacarrier-exceeded");
             return state.Invalid(TxValidationResult::TX_INPUTS_NOT_STANDARD, "txn-datacarrier-exceeded");
         }
     }
@@ -3391,6 +3395,33 @@ void Chainstate::UpdateTip(const CBlockIndex* pindexNew)
 
     UpdateTipLog(m_chainman, coins_tip, pindexNew, __func__, "",
                  util::Join(warning_messages, Untranslated(", ")).original);
+
+    if (IsTolerantLogPolicyEnabled()) {
+        const size_t limit = GetTolerantDatacarrierPolicyLimit();
+        TolerantLogMostWorkChainSelected(pindexNew->GetBlockHash(), pindexNew->nHeight);
+        CBlock block;
+        if (m_chainman.m_blockman.ReadBlock(block, *pindexNew)) {
+            const CleanBlockScore score = CalculateCleanBlockScore(block, limit);
+            TolerantLogCleanBlockScore(pindexNew->GetBlockHash(), pindexNew->nHeight, score);
+            TolerantLogBlockAcceptedAbovePolicy(pindexNew->GetBlockHash(), pindexNew->nHeight, score, limit);
+
+            for (const auto& item : m_chainman.m_blockman.m_block_index) {
+                const CBlockIndex& pindexComp = item.second;
+                if (&pindexComp == pindexNew) continue;
+                if (pindexComp.nHeight != pindexNew->nHeight) continue;
+                if (pindexComp.nChainWork != pindexNew->nChainWork) continue;
+                if (!(pindexComp.nStatus & BLOCK_VALID_TREE)) continue;
+                CBlock competing;
+                if (!m_chainman.m_blockman.ReadBlock(competing, pindexComp)) continue;
+                const CleanBlockScore competing_score = CalculateCleanBlockScore(competing, limit);
+                const uint256 preferred_hash =
+                    competing_score.total_arbitrary_data_bytes < score.total_arbitrary_data_bytes
+                        ? pindexComp.GetBlockHash()
+                        : pindexNew->GetBlockHash();
+                TolerantLogEqualWorkTie(*pindexNew, score, pindexComp, competing_score, preferred_hash);
+            }
+        }
+    }
 }
 
 /** Disconnect m_chain's tip.
@@ -6752,7 +6783,7 @@ ChainstateManager::ChainstateManager(const util::SignalInterrupt& interrupt, Opt
         ? (!g_enable_rdts)
         : GetConsensus().vDeployments[Consensus::DEPLOYMENT_REDUCED_DATA].nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
         m_options.notifications.warningSet(kernel::Warning::RULES_NOT_CONSENTED,
-            strprintf(_("Warning: RDTS is not enabled. This node is therefore vulnerable to displaying fake or fraudulent transactions. To enable RDTS enforcement and disable this warning, add %s to your %s file."),
+            strprintf(_("RDTS (BIP110) consensus enforcement is disabled by this build. The node follows standard Bitcoin consensus. To opt in to RDTS enforcement, add %s to your %s file."),
                 CONSENSUSRULES_CONFIG_NAME + "=" + CONSENSUSRULES_REQUIRED,
 #ifdef BUILDING_FOR_LIBBITCOINKERNEL
                 "bitcoin.conf"

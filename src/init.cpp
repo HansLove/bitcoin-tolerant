@@ -62,6 +62,7 @@
 #include <node/mempool_persist_args.h>
 #include <node/miner.h>
 #include <node/peerman_args.h>
+#include <node/tolerant.h>
 #include <policy/feerate.h>
 #include <policy/fees.h>
 #include <policy/fees_args.h>
@@ -514,6 +515,11 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-conf=<file>", strprintf("Specify path to read-only configuration file. Relative paths will be prefixed by datadir location (only useable from command line, not configuration file) (default: %s)", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-confrw=<file>", strprintf("Specify read/write configuration file. Relative paths will be prefixed by the network-specific datadir location (default: %s)", BITCOIN_RW_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-corepolicy", strprintf("Use Bitcoin Core policy defaults (default: %u)", DEFAULT_COREPOLICY), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-tolerant", strprintf("Enable Tolerant Knots conservative relay/mining policy profile (default: %u)", DEFAULT_TOLERANT), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-tolerantdatacarriersize", strprintf("Tolerant profile datacarrier size limit in bytes (default: %u, max: %u)", DEFAULT_TOLERANT_DATACARRIER_SIZE, MAX_OUTPUT_DATA_SIZE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-tolerantlogpolicy", strprintf("Log Tolerant policy decisions (default: %u)", DEFAULT_TOLERANT_LOG_POLICY), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-tolerantminingfilter", strprintf("Exclude policy-violating transactions from local block templates (default: %u)", DEFAULT_TOLERANT_MINING_FILTER), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-toleranttiepreference", strprintf("Prefer cleaner blocks during equal-work ties (default: %u; V1 logs only, does not change chain selection)", DEFAULT_TOLERANT_TIE_PREFERENCE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
     argsman.AddArg("-dbbatchsize", strprintf("Maximum database write batch size in bytes (default: %u)", nDefaultDbBatchSize), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::OPTIONS);
     argsman.AddArg("-dbcache=<n>", strprintf("Maximum database cache size <n> MiB (minimum %s, default is platform dependent, between %s and %s). Make sure you have enough RAM. In addition, unused memory allocated to the mempool is shared with this cache (see -maxmempool).", MIN_DBCACHE_BYTES / 1_MiB, MIN_DEFAULT_DBCACHE / 1_MiB, MAX_DEFAULT_DBCACHE / 1_MiB), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -887,6 +893,15 @@ void InitParameterInteraction(ArgsManager& args)
         args.SoftSetArg("-blockmaxweight", "4000000");
     }
 
+    if (args.GetBoolArg("-tolerant", DEFAULT_TOLERANT)) {
+        args.SoftSetArg("-datacarrier", "1");
+        if (!args.IsArgSet("-datacarriersize")) {
+            args.SoftSetArg("-datacarriersize", strprintf("%u", args.GetIntArg("-tolerantdatacarriersize", DEFAULT_TOLERANT_DATACARRIER_SIZE)));
+        }
+        args.SoftSetArg("-datacarrierfullcount", "1");
+        args.SoftSetArg("-permitbaredatacarrier", "0");
+    }
+
     // when specifying an explicit binding address, you want to listen on it
     // even when -connect or -proxy is specified
     if (!args.GetArgs("-bind").empty()) {
@@ -1049,6 +1064,8 @@ bool AppInitBasicSetup(const ArgsManager& args, std::atomic<int>& exit_status)
 
 bool AppInitParameterInteraction(const ArgsManager& args)
 {
+    InitTolerantOptions(args);
+
     const CChainParams& chainparams = Params();
     // ********************************************************* Step 2: parameter interactions
 
@@ -1735,12 +1752,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         if (g_rdts_consent == RDTSConsentFlag::RUNTIME_CHECK) {
             return InitError(_("User has not consented to supported protocol rules. Exiting"));
         } else if (g_rdts_consent == RDTSConsentFlag::UNSUPPORTED_UNSAFE_NO_ENFORCEMENT) {
-            LogError("User has not consented to supported protocol rules. This node will NOT enforce them. Warning every hour.");
+            LogError("RDTS (BIP110) consensus enforcement is disabled by this build. The node follows standard Bitcoin consensus.\n");
             g_local_services = ServiceFlags(g_local_services & ~NODE_REDUCED_DATA);
             scheduler.scheduleEvery([]{
-                LogError("RDTS is not enabled. This node is therefore vulnerable to displaying fake or fraudulent transactions.\n");
-                LogError("For more information, see: %s\n", "https://bitcoinknots.org/learn/2026-rdts");
-                LogError("To enable RDTS enforcement and disable this warning, add to %s: %s\n",
+                LogError("RDTS (BIP110) consensus enforcement is disabled by this build. The node follows standard Bitcoin consensus.\n");
+                LogError("To opt in to RDTS enforcement, add to %s: %s\n",
                     gArgs.GetPathArg("-conf", BITCOIN_CONF_FILENAME).utf8string(),
                     CONSENSUSRULES_CONFIG_NAME + "=" + CONSENSUSRULES_REQUIRED);
             }, std::chrono::hours{1});

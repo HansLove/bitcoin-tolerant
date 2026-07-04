@@ -104,6 +104,10 @@ std::string LicenseInfo()
            strprintf(_("The source code is available from %s."), URL_SOURCE_CODE).translated +
            "\n" +
            "\n" +
+           _("Tolerant Knots is derived from Bitcoin Knots, which is derived from Bitcoin Core.") + "\n" +
+           _("Bitcoin Knots and Bitcoin Core are released under the MIT License.") + "\n" +
+           _("Tolerant Knots is an independent project and is not affiliated with or endorsed by Bitcoin Core or Bitcoin Knots maintainers.") + "\n" +
+           "\n" +
            _("This is experimental software.") + "\n" +
            strprintf(_("Distributed under the MIT software license, see the accompanying file %s or %s"), "COPYING", "<https://opensource.org/licenses/MIT>").translated +
            "\n";
