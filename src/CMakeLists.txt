@@ -280,6 +280,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/psbt.cpp
   node/timeoffsets.cpp
   node/tolerant.cpp
+  node/tolerant_pricing.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txreconciliation.cpp
