@@ -1988,9 +1988,16 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-tolerantv2", DEFAULT_TOLERANT_V2)) {
         const int64_t half_life_blocks = args.GetIntArg("-tolerantreferenceblocks",
             TolerantReferenceRateTracker::DEFAULT_HALF_LIFE_BLOCKS);
+        // 0 collapses the decay onto the latest block; a negative half-life
+        // inverts recency (older blocks weigh MORE); anything above the
+        // retarget period breaks the memory ceiling the model is built on.
+        if (half_life_blocks < 1 || half_life_blocks > TolerantReferenceRateTracker::MAX_HALF_LIFE_BLOCKS) {
+            return InitError(strprintf(_("-tolerantreferenceblocks must be between 1 and %d (got %d)"),
+                TolerantReferenceRateTracker::MAX_HALF_LIFE_BLOCKS, half_life_blocks));
+        }
         node.tolerant_reference_rate = std::make_unique<TolerantReferenceRateTracker>(half_life_blocks);
         node.tolerant_chain_monitor = std::make_unique<TolerantChainMonitor>(
-            chainman.m_blockman, *node.tolerant_reference_rate);
+            chainman, *Assert(node.mempool), *node.tolerant_reference_rate);
         validation_signals.RegisterValidationInterface(node.tolerant_chain_monitor.get());
     }
 

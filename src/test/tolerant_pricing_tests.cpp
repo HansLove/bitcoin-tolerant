@@ -147,7 +147,7 @@ BOOST_AUTO_TEST_CASE(witness_payload_loses_the_discount)
 
 // ---------------------------------------------------------------------------
 // OP_RETURN bytes are already full price; the default premium must not
-// double-charge them (design §6).
+// double-charge them (design §1).
 // ---------------------------------------------------------------------------
 BOOST_AUTO_TEST_CASE(op_return_is_not_double_charged)
 {

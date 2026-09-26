@@ -36,18 +36,22 @@
 
 #include <consensus/amount.h>
 #include <kernel/types.h> // kernel::ChainstateRole
+#include <kernel/cs_main.h>
+#include <node/tolerant_pricing.h>
 #include <policy/feerate.h>
+#include <sync.h>
 #include <validationinterface.h>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 class CBlock;
 class CBlockIndex;
 class CBlockUndo;
-namespace node {
-class BlockManager;
-} // namespace node
+class CTxMemPool;
+class ChainstateManager;
+struct NewMempoolTransactionInfo;
 
 //! Default for -tolerantv2. Off by default: with this unset, the node's
 //! behavior is byte-for-byte identical to plain Bitcoin Core.
@@ -57,6 +61,9 @@ class TolerantReferenceRateTracker
 {
 public:
     static constexpr int64_t DEFAULT_HALF_LIFE_BLOCKS{6};
+    //! Upper bound for the half-life: Bitcoin's difficulty-retarget period,
+    //! the memory ceiling the decay model is designed around.
+    static constexpr int64_t MAX_HALF_LIFE_BLOCKS{2016};
     //! Below this many observed blocks, the rate is not yet reliable enough
     //! for market-priced enforcement (design §2's bootstrap guard).
     static constexpr int64_t DEFAULT_MIN_RELIABLE_BLOCKS{6};
@@ -101,26 +108,66 @@ struct TolerantBlockTotals {
  *  true for any undo data read for a block that is actually connected. */
 TolerantBlockTotals ComputeBlockFeeTotals(const CBlock& block, const CBlockUndo& undo);
 
-/** Bridges real connected blocks into a TolerantReferenceRateTracker.
+/** Result of evaluating one transaction against the live reference rate. */
+struct TolerantMempoolVerdict {
+    TolerantTxAnalysis analysis;
+    TolerantPricingResult pricing;
+    CFeeRate reference_rate;
+    //! False while the tracker is still warming up (fewer than
+    //! min_reliable_blocks observed): the pricing numbers are computed, but
+    //! no subsidy verdict should be drawn from them yet.
+    bool reference_reliable{false};
+    //! "honest", "hidden-subsidy" or "warming-up".
+    const char* Verdict() const;
+};
+
+/** Bitcoin Tolerant V2's live bridge into the node (observe-only).
  *
- *  BlockDisconnected is intentionally NOT overridden (a no-op): exponential
- *  decay cannot be undone exactly without storing full block history, and
- *  Phase 1 does not enforce anything on the reference rate -- nothing reads
- *  it to reject a transaction yet. A short reorg therefore causes only a
- *  small, transient, economically negligible skew, not a correctness bug.
- *  Revisit this if/when a later phase enforces on the rate; see
- *  doc/tolerant-v2-pricing.md. */
+ *  - BlockConnected: reads the block's undo data and feeds its realized
+ *    (fees, vbytes) into the reference-rate tracker.
+ *  - TransactionAddedToMempool: when -debug=tolerant is on, analyses and
+ *    prices the new transaction against the current reference rate and logs
+ *    the verdict. When the category is off it returns immediately -- no
+ *    locks, no analysis -- so enabling -tolerantv2 alone costs nothing per
+ *    transaction.
+ *
+ *  Nothing here rejects, excludes or reorders anything. It only measures.
+ *
+ *  BlockDisconnected is intentionally NOT overridden: exponential decay
+ *  cannot be undone exactly without storing full block history, and since
+ *  nothing enforces on the reference rate yet, a short reorg causes only a
+ *  small, transient, economically negligible skew. Revisit if a later phase
+ *  ever enforces on the rate; see doc/tolerant-v2-pricing.md.
+ *
+ *  Thread safety: the tracker is only touched under m_mutex, so future
+ *  readers (e.g. an RPC) must go through this class, not the tracker. */
 class TolerantChainMonitor : public CValidationInterface
 {
 public:
-    TolerantChainMonitor(node::BlockManager& blockman, TolerantReferenceRateTracker& tracker);
+    TolerantChainMonitor(ChainstateManager& chainman, const CTxMemPool& mempool,
+                         TolerantReferenceRateTracker& tracker);
 
     void BlockConnected(const kernel::ChainstateRole& role, const std::shared_ptr<const CBlock>& block,
                         const CBlockIndex* pindex) override;
+    void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence) override;
+
+    //! Analyse and price `tx` (paying `fee`) against the current reference
+    //! rate, resolving prevouts from the chain tip and the mempool. Returns
+    //! nullopt if any input's prevout cannot be found (e.g. already spent by
+    //! a block that confirmed the tx in the meantime) -- we never guess.
+    //! Acquires cs_main and the mempool lock; call without holding either.
+    std::optional<TolerantMempoolVerdict> EvaluateTransaction(const CTransaction& tx, CAmount fee) const
+        EXCLUSIVE_LOCKS_REQUIRED(!::cs_main, !m_mutex);
+
+    CFeeRate GetReferenceRate() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    bool IsReferenceReliable() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    int64_t BlocksObserved() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
 private:
-    node::BlockManager& m_blockman;
-    TolerantReferenceRateTracker& m_tracker;
+    ChainstateManager& m_chainman;
+    const CTxMemPool& m_mempool;
+    mutable Mutex m_mutex;
+    TolerantReferenceRateTracker& m_tracker GUARDED_BY(m_mutex);
 };
 
 #endif // BITCOIN_NODE_TOLERANT_REFERENCE_RATE_H

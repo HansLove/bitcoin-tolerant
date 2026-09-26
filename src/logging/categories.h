@@ -46,6 +46,7 @@ enum LogFlags : CategoryMask {
     KERNEL = (CategoryMask{1} << 28),
     PRIVBROADCAST = (CategoryMask{1} << 29),
     MINING = (CategoryMask{1} << 30),
+    TOLERANT = (CategoryMask{1} << 31), //!< Bitcoin Tolerant V2 honest-pricing observations
     ALL = ~NONE,
 };
 
