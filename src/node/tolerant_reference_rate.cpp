@@ -4,10 +4,15 @@
 
 #include <node/tolerant_reference_rate.h>
 
+#include <coins.h>
+#include <kernel/mempool_entry.h> // NewMempoolTransactionInfo
+#include <logging.h>
 #include <node/blockstorage.h>
-#include <policy/policy.h>       // GetVirtualTransactionSize
+#include <policy/policy.h>        // GetVirtualTransactionSize
 #include <primitives/block.h>
+#include <txmempool.h>
 #include <undo.h>
+#include <validation.h>
 
 #include <cmath>
 
@@ -71,8 +76,15 @@ TolerantBlockTotals ComputeBlockFeeTotals(const CBlock& block, const CBlockUndo&
     return totals;
 }
 
-TolerantChainMonitor::TolerantChainMonitor(node::BlockManager& blockman, TolerantReferenceRateTracker& tracker)
-    : m_blockman(blockman), m_tracker(tracker)
+const char* TolerantMempoolVerdict::Verdict() const
+{
+    if (!reference_reliable) return "warming-up";
+    return pricing.hidden_subsidy ? "hidden-subsidy" : "honest";
+}
+
+TolerantChainMonitor::TolerantChainMonitor(ChainstateManager& chainman, const CTxMemPool& mempool,
+                                           TolerantReferenceRateTracker& tracker)
+    : m_chainman(chainman), m_mempool(mempool), m_tracker(tracker)
 {
 }
 
@@ -80,20 +92,99 @@ void TolerantChainMonitor::BlockConnected(ChainstateRole role, const std::shared
                                           const CBlockIndex* pindex)
 {
     if (!block || !pindex) return;
-    // Only the background (assumeutxo) validation chainstate and the normal
-    // chainstate call this; either way it reflects a real connected block on
-    // some chain tip. We price whatever we're told was connected.
-    (void)role;
+    // Background (assumeutxo) validation replays historical blocks out of
+    // order relative to the tip; only the chainstate that follows the tip
+    // describes the current fee market.
+    if (role == ChainstateRole::BACKGROUND) return;
 
     CBlockUndo undo;
-    if (!m_blockman.ReadBlockUndo(undo, *pindex)) {
-        // Undo data unavailable (e.g. pruned, or genesis block has none to
-        // read in the first place -- genesis has no spendable inputs and
-        // its coinbase is unspendable by consensus, so it never contributes
-        // real fee-market data regardless). Skip rather than guess.
+    if (!m_chainman.m_blockman.ReadBlockUndo(undo, *pindex)) {
+        // No undo data (e.g. pruned, or the genesis block, which has no
+        // spendable inputs and never carries fee-market data). Skip rather
+        // than guess.
         return;
     }
 
     const TolerantBlockTotals totals = ComputeBlockFeeTotals(*block, undo);
-    m_tracker.AddBlock(totals.total_fees, totals.total_vbytes);
+    CFeeRate rate;
+    int64_t observed;
+    bool reliable;
+    {
+        LOCK(m_mutex);
+        m_tracker.AddBlock(totals.total_fees, totals.total_vbytes);
+        rate = m_tracker.GetReferenceRate(m_mempool.m_opts.min_relay_feerate);
+        observed = m_tracker.BlocksObserved();
+        reliable = m_tracker.IsReliable();
+    }
+    LogDebug(BCLog::TOLERANT, "[TolerantV2] block %s height=%d fees=%d vbytes=%d -> reference_rate=%s (blocks_observed=%d%s)\n",
+             pindex->GetBlockHash().ToString(), pindex->nHeight, totals.total_fees, totals.total_vbytes,
+             rate.ToString(FeeEstimateMode::SAT_VB), observed, reliable ? "" : ", warming up");
+}
+
+void TolerantChainMonitor::TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence)
+{
+    // Zero cost unless someone is going to read the result.
+    if (!LogAcceptCategory(BCLog::TOLERANT, BCLog::Level::Debug)) return;
+
+    const auto verdict = EvaluateTransaction(*tx.info.m_tx, tx.info.m_fee);
+    if (!verdict) {
+        LogDebug(BCLog::TOLERANT, "[TolerantV2] tx %s skipped: prevouts no longer available\n",
+                 tx.info.m_tx->GetHash().ToString());
+        return;
+    }
+    // A purely monetary transaction has economic == normal size by
+    // construction (tested invariant); logging each one is pure noise.
+    if (verdict->analysis.classification == TolerantDataClass::MONETARY) return;
+
+    const auto& a = verdict->analysis;
+    const auto& r = verdict->pricing;
+    LogDebug(BCLog::TOLERANT, "[TolerantV2] tx %s class=%s vbytes=%d economic_vbytes=%d fee=%d "
+             "normal_feerate=%s as_if_feerate=%s reference_rate=%s required_fee=%d verdict=%s\n",
+             tx.info.m_tx->GetHash().ToString(), TolerantDataClassToString(a.classification),
+             a.tx_vbytes, a.economic_vbytes, r.actual_fee,
+             r.normal_feerate.ToString(FeeEstimateMode::SAT_VB), r.as_if_feerate.ToString(FeeEstimateMode::SAT_VB),
+             verdict->reference_rate.ToString(FeeEstimateMode::SAT_VB), r.required_fee, verdict->Verdict());
+}
+
+std::optional<TolerantMempoolVerdict> TolerantChainMonitor::EvaluateTransaction(const CTransaction& tx, CAmount fee) const
+{
+    TolerantMempoolVerdict v;
+    {
+        LOCK(m_mutex);
+        v.reference_rate = m_tracker.GetReferenceRate(m_mempool.m_opts.min_relay_feerate);
+        v.reference_reliable = m_tracker.IsReliable();
+    }
+
+    TolerantPremiums premiums;
+    premiums.dust_relay_fee = m_mempool.m_opts.dust_relay_feerate;
+
+    {
+        LOCK2(::cs_main, m_mempool.cs);
+        CCoinsViewMemPool mempool_view(&m_chainman.ActiveChainstate().CoinsTip(), m_mempool);
+        CCoinsViewCache view(&mempool_view);
+        for (const CTxIn& txin : tx.vin) {
+            if (!view.HaveCoin(txin.prevout)) return std::nullopt;
+        }
+        v.analysis = AnalyzeTolerantTx(tx, view, premiums);
+    }
+    v.pricing = ComputeTolerantPricing(v.analysis, fee, v.reference_rate);
+    return v;
+}
+
+CFeeRate TolerantChainMonitor::GetReferenceRate() const
+{
+    LOCK(m_mutex);
+    return m_tracker.GetReferenceRate(m_mempool.m_opts.min_relay_feerate);
+}
+
+bool TolerantChainMonitor::IsReferenceReliable() const
+{
+    LOCK(m_mutex);
+    return m_tracker.IsReliable();
+}
+
+int64_t TolerantChainMonitor::BlocksObserved() const
+{
+    LOCK(m_mutex);
+    return m_tracker.BlocksObserved();
 }

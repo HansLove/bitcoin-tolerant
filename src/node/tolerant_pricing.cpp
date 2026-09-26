@@ -96,7 +96,7 @@ TolerantTxAnalysis AnalyzeTolerantTx(const CTransaction& tx, const CCoinsViewCac
     //   - Base-location data (outputs, legacy scriptSig) already pays 4 WU/byte.
     // At the default premium (1.0) the target rate is exactly 4 WU/byte, so
     // witness data gains +3 WU/byte (discount removed) and base data gains
-    // nothing (it was never discounted -- no double charge, design §6).
+    // nothing (it was never discounted -- no double charge, design §1).
     const double target_wu_per_byte = static_cast<double>(WITNESS_SCALE_FACTOR) * a.data_premium_multiplier;
     int64_t extra_weight{0};
     if (target_wu_per_byte > 1.0) {

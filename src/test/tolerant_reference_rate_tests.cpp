@@ -190,10 +190,10 @@ BOOST_AUTO_TEST_CASE(real_connected_block_totals)
 
     // The chain monitor wires this into a live tracker exactly the same way.
     TolerantReferenceRateTracker tracker;
-    TolerantChainMonitor monitor(m_node.chainman->m_blockman, tracker);
+    TolerantChainMonitor monitor(*m_node.chainman, *m_node.mempool, tracker);
     monitor.BlockConnected(ChainstateRole::NORMAL, std::make_shared<const CBlock>(block), tip);
 
-    BOOST_CHECK_EQUAL(tracker.BlocksObserved(), 1);
+    BOOST_CHECK_EQUAL(monitor.BlocksObserved(), 1);
     const CFeeRate floor{1000};
     const CFeeRate expected_rate(totals.total_fees, static_cast<uint32_t>(totals.total_vbytes));
     // CFeeRate's own equality compares its internal exact fraction (fee/size),
@@ -201,8 +201,100 @@ BOOST_AUTO_TEST_CASE(real_connected_block_totals)
     // stores an already-rounded scalar (a decayed running average has no
     // single exact source fraction to preserve). Compare the representable
     // value instead of exact-fraction identity.
-    BOOST_CHECK_EQUAL(tracker.GetReferenceRate(floor).GetFeePerK(),
+    BOOST_CHECK_EQUAL(monitor.GetReferenceRate().GetFeePerK(),
                       std::max(expected_rate.GetFeePerK(), floor.GetFeePerK()));
+}
+
+namespace {
+//! A spend of `prevout` with a realistic-size dummy scriptSig. EvaluateTransaction
+//! never validates signatures -- it only measures -- so a real signature is
+//! unnecessary; only the size matters.
+CMutableTransaction SpendOf(const COutPoint& prevout, CAmount value_out, const CScript& spk)
+{
+    CMutableTransaction tx;
+    tx.vin.emplace_back(prevout, CScript() << std::vector<unsigned char>(72, 0x30));
+    tx.vout.emplace_back(value_out, spk);
+    return tx;
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(evaluate_transaction_against_real_chain)
+{
+    const CScript spk = CScript() << ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
+    TolerantReferenceRateTracker tracker;
+    TolerantChainMonitor monitor(*m_node.chainman, *m_node.mempool, tracker);
+
+    // Evaluation only needs the prevout to be unspent, not mature; use a
+    // coinbase the block-mining loop below never touches.
+    const COutPoint coin{m_coinbase_txns[50]->GetHash(), 0};
+    const CAmount coin_value = m_coinbase_txns[50]->vout[0].nValue;
+
+    // Monetary spend: economic size == real size, no premium (design §1).
+    {
+        const CTransaction tx{SpendOf(coin, coin_value - 1000, spk)};
+        const auto v = monitor.EvaluateTransaction(tx, 1000);
+        BOOST_REQUIRE(v);
+        BOOST_CHECK(v->analysis.classification == TolerantDataClass::MONETARY);
+        BOOST_CHECK_EQUAL(v->analysis.economic_vbytes, v->analysis.tx_vbytes);
+        // Fresh tracker: no verdict may be drawn yet.
+        BOOST_CHECK(!v->reference_reliable);
+        BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "warming-up");
+    }
+
+    // OP_RETURN payload: already full price at consensus, never double charged.
+    CMutableTransaction op_return = SpendOf(coin, coin_value - 1000, spk);
+    op_return.vout.emplace_back(0, CScript() << OP_RETURN << std::vector<unsigned char>(200, 0x07));
+    const CTransaction op_return_tx{op_return};
+    {
+        const auto v = monitor.EvaluateTransaction(op_return_tx, 1000);
+        BOOST_REQUIRE(v);
+        BOOST_CHECK(v->analysis.classification == TolerantDataClass::OP_RETURN_DATA);
+        BOOST_CHECK_EQUAL(v->analysis.economic_vbytes, v->analysis.tx_vbytes);
+    }
+
+    // Warm the tracker with real connected blocks carrying a real fee market.
+    // Block 101+i spends the coinbase at height i+1: exactly 100 confirmations.
+    for (int i = 0; i < 6; ++i) {
+        const CTransaction paying{SpendOf(COutPoint{m_coinbase_txns[i]->GetHash(), 0},
+                                          m_coinbase_txns[i]->vout[0].nValue - 20000, spk)};
+        CMutableTransaction signed_tx{paying};
+        signed_tx.vin[0].scriptSig = CScript();
+        std::vector<unsigned char> sig;
+        const uint256 hash = SignatureHash(spk, signed_tx, 0, SIGHASH_ALL, 0, SigVersion::BASE);
+        BOOST_REQUIRE(coinbaseKey.Sign(hash, sig));
+        sig.push_back(static_cast<unsigned char>(SIGHASH_ALL));
+        signed_tx.vin[0].scriptSig << sig;
+        const CBlock block = CreateAndProcessBlock({signed_tx}, spk);
+        const CBlockIndex* tip = WITH_LOCK(::cs_main, return m_node.chainman->ActiveChain().Tip());
+        BOOST_REQUIRE_EQUAL(tip->GetBlockHash(), block.GetHash());
+        monitor.BlockConnected(ChainstateRole::NORMAL, std::make_shared<const CBlock>(block), tip);
+    }
+    BOOST_CHECK(monitor.IsReferenceReliable());
+    const CFeeRate reference = monitor.GetReferenceRate();
+
+    // Paying well below the realized market rate is now a real verdict...
+    {
+        const auto v = monitor.EvaluateTransaction(op_return_tx, 100);
+        BOOST_REQUIRE(v);
+        BOOST_CHECK(v->reference_reliable);
+        BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "hidden-subsidy");
+    }
+    // ...and paying the honest required fee clears it -- data is priced, never banned.
+    {
+        const auto probe = monitor.EvaluateTransaction(op_return_tx, 0);
+        BOOST_REQUIRE(probe);
+        const auto v = monitor.EvaluateTransaction(op_return_tx, probe->pricing.required_fee);
+        BOOST_REQUIRE(v);
+        BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "honest");
+        BOOST_CHECK(v->pricing.eligible_for_template);
+        BOOST_CHECK(v->reference_rate == reference);
+    }
+
+    // An unknown prevout yields no verdict at all -- we never guess.
+    {
+        const CTransaction orphan{SpendOf(COutPoint{Txid::FromUint256(uint256::ONE), 0}, 1000, spk)};
+        BOOST_CHECK(!monitor.EvaluateTransaction(orphan, 1000));
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
