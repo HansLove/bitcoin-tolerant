@@ -74,6 +74,8 @@ public:
     //! Feed one newly-connected block's realized totals into the tracker.
     void AddBlock(CAmount total_fees, int64_t total_vbytes);
 
+    int64_t HalfLifeBlocks() const { return m_half_life_blocks; }
+
     //! Number of blocks observed since construction (does not decay).
     int64_t BlocksObserved() const { return m_blocks_observed; }
 
@@ -86,6 +88,7 @@ public:
     CFeeRate GetReferenceRate(const CFeeRate& floor) const;
 
 private:
+    int64_t m_half_life_blocks;
     double m_decay_per_block; //!< 0.5^(1/half_life_blocks), in (0, 1).
     double m_weighted_fees{0.0};
     double m_weighted_vbytes{0.0};
@@ -107,6 +110,15 @@ struct TolerantBlockTotals {
  *  align with `block` (one CTxUndo per non-coinbase transaction, in order) --
  *  true for any undo data read for a block that is actually connected. */
 TolerantBlockTotals ComputeBlockFeeTotals(const CBlock& block, const CBlockUndo& undo);
+
+/** A consistent, single-lock view of the reference rate's state. */
+struct TolerantReferenceSnapshot {
+    CFeeRate reference_rate;
+    CFeeRate floor;
+    int64_t blocks_observed{0};
+    int64_t half_life_blocks{0};
+    bool reliable{false};
+};
 
 /** Result of evaluating one transaction against the live reference rate. */
 struct TolerantMempoolVerdict {
@@ -159,6 +171,7 @@ public:
     std::optional<TolerantMempoolVerdict> EvaluateTransaction(const CTransaction& tx, CAmount fee) const
         EXCLUSIVE_LOCKS_REQUIRED(!::cs_main, !m_mutex);
 
+    TolerantReferenceSnapshot GetSnapshot() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     CFeeRate GetReferenceRate() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     bool IsReferenceReliable() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     int64_t BlocksObserved() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);

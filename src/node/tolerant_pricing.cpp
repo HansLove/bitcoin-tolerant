@@ -113,6 +113,7 @@ TolerantTxAnalysis AnalyzeTolerantTx(const CTransaction& tx, const CCoinsViewCac
     // 1 vB/B times the premium. base = economic - data holds by construction,
     // so a monetary tx has data_vbytes == 0 and base == economic_vbytes.
     const int64_t total_data_bytes = already_full_price_data + a.witness_bytes;
+    a.data_bytes = total_data_bytes;
     a.data_vbytes = std::llround(static_cast<double>(total_data_bytes) * a.data_premium_multiplier);
     a.base_monetary_vbytes = std::max<int64_t>(0, a.economic_vbytes - a.data_vbytes);
 

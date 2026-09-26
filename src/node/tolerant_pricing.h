@@ -75,6 +75,7 @@ struct TolerantTxAnalysis {
     int64_t economic_vbytes{0};      //!< base + data priced at the honest rate.
     int64_t base_monetary_vbytes{0}; //!< Never premium-multiplied.
     int64_t data_vbytes{0};          //!< The premium base (honest data footprint).
+    int64_t data_bytes{0};           //!< All arbitrary-data bytes detected, every location.
     int64_t op_return_bytes{0};      //!< Output-side datacarrier bytes (already full price).
     int64_t op_return_count{0};
     int64_t witness_bytes{0};        //!< Witness/script-path datacarrier bytes (discounted today).
