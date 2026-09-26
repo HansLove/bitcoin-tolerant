@@ -25,6 +25,8 @@ class ChainstateManager;
 class ECC_Context;
 class NetGroupManager;
 class PeerManager;
+class TolerantChainMonitor;
+class TolerantReferenceRateTracker;
 namespace interfaces {
 class Chain;
 class ChainClient;
@@ -68,6 +70,10 @@ struct NodeContext {
     std::unique_ptr<CTxMemPool> mempool;
     std::unique_ptr<const NetGroupManager> netgroupman;
     std::unique_ptr<CBlockPolicyEstimator> fee_estimator;
+    //! Bitcoin Tolerant V2: recent-block reference rate tracker and its
+    //! chain-connected feed. Null unless -tolerantv2=1. See node/tolerant_reference_rate.h.
+    std::unique_ptr<TolerantReferenceRateTracker> tolerant_reference_rate;
+    std::unique_ptr<TolerantChainMonitor> tolerant_chain_monitor;
     std::unique_ptr<PeerManager> peerman;
     std::unique_ptr<ChainstateManager> chainman;
     std::unique_ptr<BanMan> banman;
