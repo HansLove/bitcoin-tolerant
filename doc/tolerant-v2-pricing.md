@@ -1,6 +1,6 @@
 # Bitcoin Tolerant V2 — Honest Blockspace Pricing
 
-**Status:** Phase 1 (observe-only) implemented on Bitcoin Core v30.3. Nothing in
+**Status:** Phase 1 (observe-only) complete on Bitcoin Core v30.3. Nothing in
 this document changes consensus, chain selection, or which valid blocks are
 accepted — at any phase.
 
@@ -38,8 +38,9 @@ tracks upstream Core releases. All Tolerant logic lives in Tolerant-owned files:
 
 Changes to Core's own files are deliberately minimal — wiring only, no logic:
 `src/init.cpp` (flags, lifecycle), `src/node/context.{h,cpp}` (ownership),
-`src/logging.{h,cpp}` (the `tolerant` log category), and the two
-`CMakeLists.txt`. Keeping logic out of Core's files keeps upstream syncs close to
+`src/logging.{h,cpp}` (the `tolerant` log category), `src/rpc/register.h`
+(one registration line), and the two `CMakeLists.txt`. The RPC itself lives in
+the Tolerant-owned `src/rpc/tolerant.cpp`. Keeping logic out of Core's files keeps upstream syncs close to
 conflict-free.
 
 ## Why this exists: the witness discount
@@ -196,7 +197,7 @@ No flag is added before the code that reads it exists.
 | **1b** | Reference rate from confirmed blocks | ✅ |
 | **1c** | Flags, lifecycle in `bitcoind` | ✅ |
 | **1d** | Evaluate mempool transactions, `[TolerantV2]` logging | ✅ |
-| **1e** | `gettolerantpricing` RPC — the reference price, machine-readable | Planned |
+| **1e** | `gettolerantpricing` RPC — the reference price, machine-readable | ✅ |
 | **2** | Local mining templates only; market-priced, default off | Planned |
 | **3** | Relay policy; optional, deliberately last | Planned |
 
@@ -218,7 +219,29 @@ With `-tolerantv2=1 -debug=tolerant`:
              reference_rate=0.100 sat/vB required_fee=34 verdict=honest
 ```
 
-Verdicts: `honest`, `hidden-subsidy`, `warming-up`. Monetary transactions are not
+Verdicts: `honest`, `hidden-subsidy`, `warming-up`.
+
+### RPC: `gettolerantpricing ( "txid" )`
+
+Read-only; requires `-tolerantv2=1` (otherwise it errors rather than report a
+price that is not being tracked). Listed under its own `== Tolerant ==` section
+in `bitcoin-cli help`.
+
+```txt
+$ bitcoin-cli gettolerantpricing
+{ "reference_rate": 4.107, "floor": 0.1, "reliable": true,
+  "blocks_observed": 111, "half_life_blocks": 6 }
+
+$ bitcoin-cli gettolerantpricing <mempool txid>      # illustrative values
+{ ..., "tx": { "classification": "WITNESS_DATA", "vsize": 210, "economic_vsize": 588,
+               "data_bytes": 505, "witness_data_bytes": 505, "fee": 40,
+               "normal_feerate": 0.19, "as_if_feerate": 0.068, "required_fee": 59,
+               "hidden_subsidy": true, "verdict": "hidden-subsidy" } }
+```
+
+Rates are in sat/vB, amounts in satoshis. It reports every transaction,
+including monetary ones: a reference price that is only visible when it
+condemns something is not a reference price. Monetary transactions are not
 logged; their verdict is fixed by construction.
 
 Per-transaction evaluation takes `cs_main` to resolve prevouts, so it runs **only
@@ -240,6 +263,7 @@ costs one validation-interface subscriber and one accumulator update per block.
 | Bootstrap guard, floor | `unreliable_until_warm`, `floor_always_applies` |
 | Exact fees from a real connected block | `real_connected_block_totals` |
 | End-to-end verdicts on a real chain; unknown prevouts never guessed | `evaluate_transaction_against_real_chain` |
+| RPC end to end, incl. a real P2WSH witness envelope on regtest | `test/functional/feature_tolerant_pricing.py` |
 
 ## 10. Non-negotiables
 

@@ -17,7 +17,8 @@
 #include <cmath>
 
 TolerantReferenceRateTracker::TolerantReferenceRateTracker(int64_t half_life_blocks, int64_t min_reliable_blocks)
-    : m_decay_per_block(std::pow(0.5, 1.0 / static_cast<double>(half_life_blocks))),
+    : m_half_life_blocks(half_life_blocks),
+      m_decay_per_block(std::pow(0.5, 1.0 / static_cast<double>(half_life_blocks))),
       m_min_reliable_blocks(min_reliable_blocks)
 {
 }
@@ -169,6 +170,18 @@ std::optional<TolerantMempoolVerdict> TolerantChainMonitor::EvaluateTransaction(
     }
     v.pricing = ComputeTolerantPricing(v.analysis, fee, v.reference_rate);
     return v;
+}
+
+TolerantReferenceSnapshot TolerantChainMonitor::GetSnapshot() const
+{
+    TolerantReferenceSnapshot snap;
+    snap.floor = m_mempool.m_opts.min_relay_feerate;
+    LOCK(m_mutex);
+    snap.reference_rate = m_tracker.GetReferenceRate(snap.floor);
+    snap.blocks_observed = m_tracker.BlocksObserved();
+    snap.half_life_blocks = m_tracker.HalfLifeBlocks();
+    snap.reliable = m_tracker.IsReliable();
+    return snap;
 }
 
 CFeeRate TolerantChainMonitor::GetReferenceRate() const

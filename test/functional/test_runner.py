@@ -150,6 +150,7 @@ BASE_SCRIPTS = [
     'feature_csv_activation.py',
     'p2p_sendheaders.py',
     'feature_config_args.py',
+    'feature_tolerant_pricing.py',
     'wallet_listtransactions.py',
     'wallet_miniscript.py',
     # vv Tests less than 30s vv
