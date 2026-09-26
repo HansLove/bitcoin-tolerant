@@ -65,6 +65,7 @@
 #include <node/mining_args.h>
 #include <node/mining_types.h>
 #include <node/peerman_args.h>
+#include <node/tolerant_reference_rate.h>
 #include <policy/feerate.h>
 #include <policy/fees/block_policy_estimator.h>
 #include <policy/fees/estimator_args.h>
@@ -385,6 +386,12 @@ void Shutdown(NodeContext& node)
         }
     }
 
+    // Unregister Bitcoin Tolerant V2's chain monitor before the tracker and
+    // monitor themselves are destroyed below.
+    if (node.tolerant_chain_monitor && node.validation_signals) {
+        node.validation_signals->UnregisterValidationInterface(node.tolerant_chain_monitor.get());
+    }
+
     // Stop and delete all indexes only after flushing background callbacks.
     for (auto* index : node.indexes) index->Stop();
     if (g_txindex) g_txindex.reset();
@@ -423,6 +430,8 @@ void Shutdown(NodeContext& node)
     }
     node.fee_estimator_man.reset();
     node.mempool.reset();
+    node.tolerant_chain_monitor.reset();
+    node.tolerant_reference_rate.reset();
     node.chainman.reset();
     node.validation_signals.reset();
     node.scheduler.reset();
@@ -699,6 +708,8 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-acceptstalefeeestimates", strprintf("Read fee estimates even if they are stale (%sdefault: %u) fee estimates are considered stale if they are %s hours old", "regtest only; ", DEFAULT_ACCEPT_STALE_FEE_ESTIMATES, Ticks<std::chrono::hours>(MAX_FILE_AGE)), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-bytespersigop", strprintf("Equivalent bytes per sigop in transactions for relay and mining (default: %u)", DEFAULT_BYTES_PER_SIGOP), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-datacarrier", strprintf("Relay and mine data carrier transactions (default: %u)", DEFAULT_ACCEPT_DATACARRIER), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
+    argsman.AddArg("-tolerantv2", strprintf("Enable Bitcoin Tolerant V2 honest blockspace pricing: track a recent-block reference rate for observability (default: %u). Never rejects transactions or blocks on its own -- see doc/tolerant-v2-pricing.md.", DEFAULT_TOLERANT_V2), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
+    argsman.AddArg("-tolerantreferenceblocks", strprintf("Half-life, in blocks, for Bitcoin Tolerant V2's recency-weighted reference rate (default: %u, ~1 hour). A fixed constant, never auto-tuned; see doc/tolerant-v2-pricing.md section 2.", TolerantReferenceRateTracker::DEFAULT_HALF_LIFE_BLOCKS), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-datacarriersize",
                    strprintf("Relay and mine transactions whose data-carrying raw scriptPubKeys in aggregate "
                              "are of this size or less, allowing multiple outputs (default: %u)",
@@ -1966,6 +1977,22 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                      *node.mempool, *node.warnings,
                                      peerman_opts);
     validation_signals.RegisterValidationInterface(node.peerman.get());
+
+    // Bitcoin Tolerant V2: track the recent-block reference rate (design
+    // doc/tolerant-v2-pricing.md, section 2). Observe-only -- nothing reads
+    // this yet to reject a transaction or exclude anything from a template.
+    // Default off; enabling it costs one CValidationInterface subscriber and
+    // a tiny per-block accumulator, nothing more.
+    assert(!node.tolerant_reference_rate);
+    assert(!node.tolerant_chain_monitor);
+    if (args.GetBoolArg("-tolerantv2", DEFAULT_TOLERANT_V2)) {
+        const int64_t half_life_blocks = args.GetIntArg("-tolerantreferenceblocks",
+            TolerantReferenceRateTracker::DEFAULT_HALF_LIFE_BLOCKS);
+        node.tolerant_reference_rate = std::make_unique<TolerantReferenceRateTracker>(half_life_blocks);
+        node.tolerant_chain_monitor = std::make_unique<TolerantChainMonitor>(
+            chainman.m_blockman, *node.tolerant_reference_rate);
+        validation_signals.RegisterValidationInterface(node.tolerant_chain_monitor.get());
+    }
 
     // ********************************************************* Step 8: start indexers
 
