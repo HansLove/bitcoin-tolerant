@@ -242,6 +242,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/tolerant_defaults.cpp
   node/tolerant_pricing.cpp
   node/tolerant_reference_rate.cpp
+  node/tolerant_template.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txorphanage.cpp

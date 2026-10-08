@@ -14,6 +14,7 @@
 #include <node/context.h>
 #include <node/tolerant_pricing.h>
 #include <node/tolerant_reference_rate.h>
+#include <node/tolerant_template.h>
 #include <policy/feerate.h>
 #include <rpc/protocol.h>
 #include <rpc/server.h>
@@ -69,6 +70,16 @@ static RPCMethod gettolerantpricing()
                 {RPCResult::Type::BOOL, "reliable", "False while warming up (too few blocks observed to draw verdicts)"},
                 {RPCResult::Type::NUM, "blocks_observed", "Connected blocks fed into the tracker since startup"},
                 {RPCResult::Type::NUM, "half_life_blocks", "Half-life of the recency weighting, in blocks"},
+                {RPCResult::Type::STR, "mode", "Template pricing mode: observe or market"},
+                {RPCResult::Type::OBJ, "last_template", /*optional=*/true, "The most recent block template this node built",
+                {
+                    {RPCResult::Type::NUM, "height", "Height of the template"},
+                    {RPCResult::Type::NUM, "reference_rate", "Reference rate used, in sat/vB"},
+                    {RPCResult::Type::BOOL, "applied", "True if hidden-subsidy chunks were left out (market mode, reliable rate)"},
+                    {RPCResult::Type::NUM, "chunks_flagged", "Chunks that use the witness discount and pay below the reference rate"},
+                    {RPCResult::Type::NUM, "txs_flagged", "Transactions in those chunks"},
+                    {RPCResult::Type::NUM, "fees_flagged", "Their fees, in satoshis: what leaving them out gives up"},
+                }},
                 {RPCResult::Type::OBJ, "tx", /*optional=*/true, "Only present if txid was given",
                 {
                     {RPCResult::Type::STR_HEX, "txid", "The transaction id"},
@@ -83,7 +94,7 @@ static RPCMethod gettolerantpricing()
                     {RPCResult::Type::NUM, "normal_feerate", "fee / vsize, in sat/vB"},
                     {RPCResult::Type::NUM, "as_if_feerate", "fee / economic_vsize, in sat/vB"},
                     {RPCResult::Type::NUM, "required_fee", "economic_vsize x reference_rate, in satoshis"},
-                    {RPCResult::Type::BOOL, "hidden_subsidy", "True if as_if_feerate is below the reference rate"},
+                    {RPCResult::Type::BOOL, "hidden_subsidy", "True if the transaction uses the witness discount and as_if_feerate is below the reference rate. Never true for payments or OP_RETURN, which pay full weight"},
                     {RPCResult::Type::STR, "verdict", "honest, hidden-subsidy, or warming-up (no verdict drawn yet)"},
                 }},
             }},
@@ -104,6 +115,17 @@ static RPCMethod gettolerantpricing()
             result.pushKV("reliable", snap.reliable);
             result.pushKV("blocks_observed", snap.blocks_observed);
             result.pushKV("half_life_blocks", snap.half_life_blocks);
+            result.pushKV("mode", TolerantPricingModeToString(monitor.Mode()));
+            if (const auto t = monitor.LastTemplate()) {
+                UniValue tmpl{UniValue::VOBJ};
+                tmpl.pushKV("height", t->height);
+                tmpl.pushKV("reference_rate", SatPerVB(t->reference_rate));
+                tmpl.pushKV("applied", t->applied);
+                tmpl.pushKV("chunks_flagged", t->chunks_flagged);
+                tmpl.pushKV("txs_flagged", t->txs_flagged);
+                tmpl.pushKV("fees_flagged", t->fees_flagged);
+                result.pushKV("last_template", std::move(tmpl));
+            }
 
             if (request.params[0].isNull()) return result;
 

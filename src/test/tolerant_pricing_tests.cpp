@@ -301,4 +301,32 @@ BOOST_AUTO_TEST_CASE(premiums_scale_data_not_monetary)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cheap is not subsidized. Only the witness discount creates a subsidy;
+// payments and OP_RETURN pay full weight however little they pay.
+// ---------------------------------------------------------------------------
+BOOST_AUTO_TEST_CASE(cheap_full_weight_txs_are_not_subsidies)
+{
+    CCoinsViewCache coins(&CoinsViewEmpty::Get());
+    const CFeeRate reference{66000}; // a fee spike: 66 sat/vB
+
+    const CTransaction payment{MonetaryTx(coins)};
+    const TolerantTxAnalysis pa = AnalyzeTolerantTx(payment, coins);
+    const TolerantPricingResult pr = ComputeTolerantPricing(pa, 10, reference);
+    BOOST_CHECK(pr.as_if_feerate < reference);
+    BOOST_CHECK(!pr.hidden_subsidy);
+    BOOST_CHECK(pr.eligible_for_template);
+
+    CMutableTransaction mtx;
+    mtx.vin.push_back(FundInput(coins, P2WPKH_SCRIPT));
+    mtx.vout.emplace_back(ABOVE_DUST, P2WPKH_SCRIPT);
+    mtx.vout.emplace_back(0, CScript() << OP_RETURN << std::vector<unsigned char>(200, 0x07));
+    const CTransaction op_return{mtx};
+    const TolerantTxAnalysis oa = AnalyzeTolerantTx(op_return, coins);
+    const TolerantPricingResult orr = ComputeTolerantPricing(oa, 10, reference);
+    BOOST_CHECK(orr.as_if_feerate < reference);
+    BOOST_CHECK(!orr.hidden_subsidy);
+    BOOST_CHECK(orr.eligible_for_template);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

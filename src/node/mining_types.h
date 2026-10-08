@@ -24,6 +24,8 @@
 #include <optional>
 #include <vector>
 
+class TolerantChainMonitor;
+
 namespace node {
 
 /**
@@ -89,6 +91,13 @@ struct BlockCreateOptions {
      * Should only be disabled for tests / benchmarks.
      */
     bool test_block_validity{true};
+    /**
+     * Bitcoin Tolerant: price chunks honestly in this template (see
+     * node/tolerant_template.h). Set by the node for its own mining paths,
+     * never by clients; null leaves the template exactly as Bitcoin Core
+     * builds it (e.g. for fee estimation).
+     */
+    TolerantChainMonitor* tolerant{nullptr};
 };
 
 struct BlockWaitOptions {

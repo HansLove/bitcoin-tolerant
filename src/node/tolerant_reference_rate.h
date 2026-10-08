@@ -15,14 +15,14 @@
 // rather than swinging the rate outright, and old data fades out instead of
 // falling off a hard cliff.
 //
-// Why no explicit window buffer: true exponential decay is representable as
-// a running accumulator (weighted_fees, weighted_vbytes) updated by a single
-// multiply-and-add per block -- it never needs to store history. After
-// roughly 2016 blocks (Bitcoin's own difficulty-retarget period -- chosen as
-// the *outer bound* this decay is compared against, not a reset point; see
-// doc/tolerant-v2-pricing.md §2) a block's weight is ~0.5^336, i.e.
-// indistinguishable from zero. The 2016-block "ceiling" is a property of the
-// half-life, not a second parameter to configure.
+// History and reorgs: the tracker keeps the realized totals of the last
+// WindowBlocks() blocks (ten half-lives, at least one 2016-block retarget
+// period) and recomputes the decay from them. That makes a reorg exactly
+// reversible: disconnected blocks are dropped and the rate is recomputed as
+// if they never existed. Beyond the window a block's weight is under 0.1%;
+// at the default half-life of 6 the window is 2016 blocks and the residual
+// weight there is 0.5^336, indistinguishable from zero. The retarget period
+// is the memory ceiling, never a reset point.
 //
 // The rate is sourced from CONFIRMED blocks (via undo data), never from the
 // local mempool. This is deliberate: a mempool-derived measurement inherits
@@ -38,11 +38,13 @@
 #include <kernel/types.h> // kernel::ChainstateRole
 #include <kernel/cs_main.h>
 #include <node/tolerant_pricing.h>
+#include <node/tolerant_template.h>
 #include <policy/feerate.h>
 #include <sync.h>
 #include <validationinterface.h>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 
@@ -71,28 +73,53 @@ public:
     explicit TolerantReferenceRateTracker(int64_t half_life_blocks = DEFAULT_HALF_LIFE_BLOCKS,
                                           int64_t min_reliable_blocks = DEFAULT_MIN_RELIABLE_BLOCKS);
 
-    //! Feed one newly-connected block's realized totals into the tracker.
+    //! Feed a connected block's realized totals. Blocks must arrive in
+    //! ascending height; a height at or below the newest one already held is
+    //! a duplicate (e.g. a block seen both while backfilling at startup and
+    //! through a queued notification) and is ignored. Returns whether the
+    //! block was added.
+    bool AddBlock(int height, CAmount total_fees, int64_t total_vbytes);
+    //! Convenience for callers without heights (tests): the next height.
     void AddBlock(CAmount total_fees, int64_t total_vbytes);
+
+    //! Undo every block at or above `height` (a reorg). Exact: the rate is
+    //! recomputed from the remaining history, as if those blocks never came.
+    void RemoveBlocksFrom(int height);
 
     int64_t HalfLifeBlocks() const { return m_half_life_blocks; }
 
-    //! Number of blocks observed since construction (does not decay).
-    int64_t BlocksObserved() const { return m_blocks_observed; }
+    //! Blocks kept in the history: ten half-lives (0.1% residual weight
+    //! beyond it), and never fewer than one retarget period.
+    size_t WindowBlocks() const { return m_window; }
 
-    //! False until at least `min_reliable_blocks` have been observed --
-    //! market-priced enforcement must not act on the rate before this.
-    bool IsReliable() const { return m_blocks_observed >= m_min_reliable_blocks; }
+    //! Blocks currently contributing to the rate.
+    int64_t BlocksObserved() const { return static_cast<int64_t>(m_history.size()); }
+
+    //! Height of the newest block held, if any.
+    std::optional<int> TipHeight() const;
+
+    //! False until at least `min_reliable_blocks` are held -- market-priced
+    //! enforcement must not act on the rate before this.
+    bool IsReliable() const { return BlocksObserved() >= m_min_reliable_blocks; }
 
     //! The current reference rate, floored at `floor` (typically minrelayfee).
-    //! Returns `floor` unconditionally if no blocks have been observed yet.
+    //! Returns `floor` unconditionally if no blocks are held.
     CFeeRate GetReferenceRate(const CFeeRate& floor) const;
 
 private:
+    struct Entry {
+        int height;
+        CAmount fees;
+        int64_t vbytes;
+    };
+    void Recompute();
+
     int64_t m_half_life_blocks;
     double m_decay_per_block; //!< 0.5^(1/half_life_blocks), in (0, 1).
+    size_t m_window;
+    std::deque<Entry> m_history; //!< Oldest first.
     double m_weighted_fees{0.0};
     double m_weighted_vbytes{0.0};
-    int64_t m_blocks_observed{0};
     int64_t m_min_reliable_blocks;
 };
 
@@ -145,11 +172,8 @@ struct TolerantMempoolVerdict {
  *
  *  Nothing here rejects, excludes or reorders anything. It only measures.
  *
- *  BlockDisconnected is intentionally NOT overridden: exponential decay
- *  cannot be undone exactly without storing full block history, and since
- *  nothing enforces on the reference rate yet, a short reorg causes only a
- *  small, transient, economically negligible skew. Revisit if a later phase
- *  ever enforces on the rate; see doc/tolerant-v2-pricing.md.
+ *  BlockDisconnected undoes the disconnected blocks exactly (the tracker
+ *  keeps a bounded history and recomputes), so a reorg leaves no trace.
  *
  *  Thread safety: the tracker is only touched under m_mutex, so future
  *  readers (e.g. an RPC) must go through this class, not the tracker. */
@@ -157,10 +181,20 @@ class TolerantChainMonitor final : public CValidationInterface
 {
 public:
     TolerantChainMonitor(ChainstateManager& chainman, const CTxMemPool& mempool,
-                         TolerantReferenceRateTracker& tracker);
+                         TolerantReferenceRateTracker& tracker,
+                         TolerantPricingMode mode = DEFAULT_TOLERANT_PRICING_MODE);
+
+    TolerantPricingMode Mode() const { return m_mode; }
+
+    //! Called by TolerantTemplatePricer after each local template build.
+    void RecordTemplate(const TolerantTemplateStats& stats) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    //! The most recent local template's pricing, if a template was built.
+    std::optional<TolerantTemplateStats> LastTemplate() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     void BlockConnected(const kernel::ChainstateRole& role, const std::shared_ptr<const CBlock>& block,
                         const CBlockIndex* pindex) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    void BlockDisconnected(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) LOCKS_EXCLUDED(::cs_main);
 
@@ -172,6 +206,13 @@ public:
     std::optional<TolerantMempoolVerdict> EvaluateTransaction(const CTransaction& tx, CAmount fee) const
         EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) LOCKS_EXCLUDED(::cs_main);
 
+    //! Load the most recent `depth` blocks of the active chain from disk, so
+    //! a restarted node prices from the same history as one that never
+    //! stopped. Call before registering for validation signals; blocks also
+    //! delivered later through a notification are ignored as duplicates.
+    //! Returns the number of blocks loaded.
+    int Backfill(int depth) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !m_mutex);
+
     TolerantReferenceSnapshot GetSnapshot() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     CFeeRate GetReferenceRate() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     bool IsReferenceReliable() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
@@ -180,8 +221,10 @@ public:
 private:
     ChainstateManager& m_chainman;
     const CTxMemPool& m_mempool;
+    const TolerantPricingMode m_mode;
     mutable Mutex m_mutex;
     TolerantReferenceRateTracker& m_tracker GUARDED_BY(m_mutex);
+    std::optional<TolerantTemplateStats> m_last_template GUARDED_BY(m_mutex);
 };
 
 #endif // BITCOIN_NODE_TOLERANT_REFERENCE_RATE_H

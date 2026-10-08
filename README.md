@@ -29,9 +29,11 @@ required_fee    = economic_vbytes × reference_rate
 - **Quiet markets stay cheap.** When nobody competes for space, the price falls
   to the minimum relay fee for everyone, data included.
 
-Today the node measures every block, gives each data-carrying transaction a
-verdict (`honest` or `hidden-subsidy`), and publishes the reference price. It
-rejects nothing.
+The node measures every block, gives each data-carrying transaction a verdict
+(`honest` or `hidden-subsidy`), and publishes the reference price. In `market`
+mode its own block templates leave out chunks that use the witness discount and
+pay below that price. It never rejects a transaction from the mempool, and
+always accepts blocks mined by others.
 
 Run it
 ------
@@ -51,6 +53,7 @@ instructions are in `doc/build-*.md`.
 |---|---|---|
 | `-tolerantv2` | `0` | Enables Bitcoin Tolerant. With `0`, the node is plain Bitcoin Core. |
 | `-tolerantreferenceblocks` | `6` | Half-life of the reference rate, in blocks (1–2016). |
+| `-tolerantpricingmode` | `observe` | `observe` logs what templates would leave out; `market` leaves it out. |
 | `-debug=tolerant` | off | Logs each block's rate and each data transaction's verdict. |
 
 Outside its reach
@@ -68,6 +71,7 @@ Design and code
 - Detection: `src/node/tolerant_datacarrier.{h,cpp}`
 - Pricing: `src/node/tolerant_pricing.{h,cpp}`
 - Reference rate and chain monitor: `src/node/tolerant_reference_rate.{h,cpp}`
+- Block templates: `src/node/tolerant_template.{h,cpp}`
 - RPC: `src/rpc/tolerant.cpp`
 
 All Tolerant logic lives in its own files. Bitcoin Core's files carry only
@@ -77,8 +81,9 @@ reviewed with `contrib/tolerant/upstream-review.sh` before Tolerant moves to it.
 Tests:
 
 ```sh
-build/bin/test_bitcoin --run_test=tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests
+build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests,tolerant_template_tests
 build/test/functional/feature_tolerant_pricing.py
+build/test/functional/feature_tolerant_template.py
 ```
 
 Branches

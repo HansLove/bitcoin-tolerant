@@ -95,8 +95,12 @@ struct TolerantPricingResult {
     CFeeRate normal_feerate{};
     CFeeRate as_if_feerate{};
     int64_t economic_vbytes{0};
-    bool eligible_for_template{true}; //!< Defaults open, not closed.
-    bool hidden_subsidy{false};       //!< as_if_feerate < reference_rate.
+    //! False only for a hidden subsidy. Defaults open, not closed.
+    bool eligible_for_template{true};
+    //! Uses the witness discount (economic size > real size) AND pays below
+    //! the reference rate on its economic size. Never true for payments or
+    //! OP_RETURN, which pay full weight.
+    bool hidden_subsidy{false};
     std::string reason;
 };
 

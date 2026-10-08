@@ -1,6 +1,6 @@
 # Bitcoin Tolerant V2 — Honest Blockspace Pricing
 
-**Status:** Phase 1 (observe-only) complete on Bitcoin Core v30.3. Nothing in
+**Status:** Phase 1 complete; Phase 2 (local templates) implemented on Bitcoin Core v32. Nothing in
 this document changes consensus, chain selection, or which valid blocks are
 accepted — at any phase.
 
@@ -62,8 +62,13 @@ reference_rate  = Σ(fees_i · w_i) / Σ(vbytes_i · w_i)      over confirmed bl
 economic_vbytes = vsize(tx_weight + extra_weight)
 required_fee    = economic_vbytes × reference_rate
 as_if_feerate   = actual_fee / economic_vbytes
-hidden_subsidy  ⟺ as_if_feerate < reference_rate
+hidden_subsidy  ⟺ economic_vbytes > vbytes  AND  as_if_feerate < reference_rate
 ```
+
+A hidden subsidy requires actually using the witness discount. A payment or an
+OP_RETURN that pays little is *cheap*, not subsidized: it pays full weight and
+already sorts low in Core's templates. Treating it as a subsidy would price
+data for being data rather than for the space it takes (principle 2).
 
 `extra_weight` charges each data byte the honest rate *relative to the consensus
 weight it already pays*:
@@ -123,12 +128,21 @@ would introduce an artificial discontinuity.
 The half-life is **one fixed, visible constant**, never auto-tuned. An adaptive
 window would trade one arguable number for several buried ones.
 
-### Known limitation: reorgs
+### Reorgs and restarts
 
-Exponential decay cannot be undone exactly without storing history, so
-`BlockDisconnected` is intentionally a no-op. A short reorg causes a small,
-transient skew. This is acceptable while nothing enforces on the rate, and must
-be revisited before any phase does.
+The tracker keeps the realized totals of a bounded window of blocks (ten
+half-lives, at least one 2016-block retarget period) and recomputes the decay
+from them. Consequences:
+
+- **Reorgs are undone exactly.** `BlockDisconnected` drops the disconnected
+  blocks and the rate is recomputed as if they never existed; the result is
+  identical to a node that never saw the abandoned branch.
+- **Restarts don't reset the price.** At startup the node loads the last ten
+  half-lives of blocks from disk (60 blocks by default, capped at 288), so a
+  restarted node prices from the same history as one that never stopped, and
+  is reliable immediately instead of warming up for an hour.
+- **Duplicates are ignored.** Blocks arrive in ascending height; a block seen
+  both during the startup load and through a queued notification counts once.
 
 ## 3. Permanence
 
@@ -184,8 +198,7 @@ anything.
 | `-debug=tolerant` | off | **Implemented** | Per-block and per-transaction observations. |
 | `-tolerantpermanencepremium` | `1.0` | Planned | Multiplier on data bytes. |
 | `-tolerantexternalitypremium` | `1.0` | Planned | Operator judgment, never inferred. |
-| `-tolerantpricingmode` | `observe` | Planned | Phase 2 gate. |
-| `-tolerantmarketexceptions` | `0` | Planned | Never default-on. |
+| `-tolerantpricingmode` | `observe` | **Implemented** | `observe`: templates unchanged, would-be exclusions logged and reported. `market`: hidden-subsidy chunks left out of this node's templates. |
 
 No flag is added before the code that reads it exists.
 
@@ -198,12 +211,49 @@ No flag is added before the code that reads it exists.
 | **1c** | Flags, lifecycle in `bitcoind` | ✅ |
 | **1d** | Evaluate mempool transactions, `[TolerantV2]` logging | ✅ |
 | **1e** | `gettolerantpricing` RPC — the reference price, machine-readable | ✅ |
-| **2** | Local mining templates only; market-priced, default off | Planned |
+| **2** | Local mining templates; `market` mode opt-in, `observe` default | ✅ (on Core v32) |
 | **3** | Relay policy; optional, deliberately last | Planned |
 
 Phase 3 is last for a reason: relay policy that diverges from the network
 partitions a node's mempool from its peers and is how "local policy" becomes de
 facto soft enforcement. **No phase touches consensus.**
+
+## 7b. Phase 2: local block templates
+
+Core v32 builds templates from cluster-mempool chunks, ordered by feerate on
+their *discounted* size, so a chunk carrying witness data ranks higher than
+the space it takes justifies. Before Core includes a chunk,
+`TolerantTemplatePricer` (`src/node/tolerant_template.{h,cpp}`) prices it as a
+unit:
+
+```txt
+uses_discount  = Σ economic_vbytes > Σ vbytes
+hidden_subsidy = uses_discount AND Σ modified_fee / Σ economic_vbytes < reference_rate
+```
+
+- **The chunk is the unit.** A child that pays for its parent (CPFP) pays for
+  both, so a cheap inscription can be carried by a child that pays the honest
+  price for the pair.
+- **Modified fees count.** A `prioritisetransaction` delta is a payment the
+  miner received out of band.
+- **`market`** skips a hidden-subsidy chunk with `SkipBuilderChunk()`, which
+  also skips the rest of its cluster, so no child ever enters without its
+  parent. The skip is not counted as a "block is full" failure, so pricing
+  never cuts a template short.
+- **`observe`** (default) changes nothing and counts what `market` would do.
+- **Never excluded:** payments, OP_RETURN, chunks paying the reference rate on
+  their true size, and anything while the reference rate is warming up.
+- **Only this node's own templates.** The pricer is set by the node in
+  `createNewBlock()` for `getblocktemplate`, `generate*` and IPC mining
+  clients, and cannot be set or removed by a client. Core's mempool fee
+  estimator also builds templates; it gets none, so fee estimates stay exactly
+  Core's. Blocks mined by others are validated and accepted unchanged.
+- **The cost is visible.** `gettolerantpricing` reports, for the last
+  template, how many chunks were flagged and the fees they carried: what
+  excluding them gives up.
+
+A transaction left out stays in the mempool and keeps relaying. If another
+miner includes it, this node accepts that block like any other.
 
 ## 8. Observability
 
@@ -220,6 +270,14 @@ With `-tolerantv2=1 -debug=tolerant`:
 ```
 
 Verdicts: `honest`, `hidden-subsidy`, `warming-up`.
+
+With `-tolerantpricingmode` active, each template that meets a hidden-subsidy
+chunk logs it (illustrative values):
+
+```txt
+[TolerantV2] template height=113 chunk first_tx=<txid> txs=1 vbytes=210 economic_vbytes=588 fee=31
+             as_if_feerate=0.052 sat/vB < reference_rate=0.100 sat/vB -> excluded
+```
 
 ### RPC: `gettolerantpricing ( "txid" )`
 
@@ -263,7 +321,12 @@ costs one validation-interface subscriber and one accumulator update per block.
 | Bootstrap guard, floor | `unreliable_until_warm`, `floor_always_applies` |
 | Exact fees from a real connected block | `real_connected_block_totals` |
 | End-to-end verdicts on a real chain; unknown prevouts never guessed | `evaluate_transaction_against_real_chain` |
+| Cheap payments and OP_RETURN are not subsidies | `cheap_full_weight_txs_are_not_subsidies` |
+| Reorgs undone exactly; duplicates ignored; history bounded | `reorg_is_undone_exactly`, `duplicates_and_old_heights_are_ignored`, `history_is_bounded` |
+| Startup load and disconnect on a real chain | `backfill_and_disconnect_on_real_chain` |
+| Chunk pricing, including a CPFP child paying for a data parent | `tolerant_template_tests` |
 | RPC end to end, incl. a real P2WSH witness envelope on regtest | `test/functional/feature_tolerant_pricing.py` |
+| `market` excludes, `observe` doesn't, external blocks accepted, restart stays reliable | `test/functional/feature_tolerant_template.py` |
 
 ## 10. Non-negotiables
 
@@ -274,14 +337,19 @@ costs one validation-interface subscriber and one accumulator update per block.
 - Scarcity is measured from confirmed blocks, never fabricated from local state.
 - Output count is never priced.
 - The externality multiplier is never inferred.
-- Market-priced exceptions are never default-on.
+- `market` mode is never default-on.
+- Local template pricing never affects fee estimation.
 
 ## 11. Open questions
 
-1. **Reorg exactness** before any enforcing phase: accept the transient skew, or
-   keep a small per-block buffer (bounded by max reorg depth) to rebuild the
-   accumulator exactly?
-2. **UTXO-bloat pricing mechanics:** Core's `-dustrelayfee` already covers part of
+1. **Gate or re-rank?** Phase 2 gates: a chunk either pays the reference rate
+   on its true size or is left out. A chunk that passes still ranks by Core's
+   discounted feerate. Re-ranking every chunk by its honest feerate would be
+   more exact, but means diverging from Core's block builder, which this
+   project avoids (doc/tolerant-upstream.md).
+2. **Template cost.** Pricing analyzes every witness transaction a template
+   considers. It has not been benchmarked on a full mainnet mempool.
+3. **UTXO-bloat pricing mechanics:** Core's `-dustrelayfee` already covers part of
    this at relay. V2's dust contribution may stay analytical.
-3. **Taproot vs. witness distinction:** worth resolving only if the two ever
+4. **Taproot vs. witness distinction:** worth resolving only if the two ever
    warrant different permanence multipliers.

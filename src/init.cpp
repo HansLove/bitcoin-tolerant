@@ -710,6 +710,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-bytespersigop", strprintf("Equivalent bytes per sigop in transactions for relay and mining (default: %u)", DEFAULT_BYTES_PER_SIGOP), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-datacarrier", strprintf("Relay and mine data carrier transactions (default: %u)", DEFAULT_ACCEPT_DATACARRIER), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-tolerantv2", strprintf("Enable Bitcoin Tolerant V2 honest blockspace pricing: track a recent-block reference rate for observability (default: %u). Never rejects transactions or blocks on its own -- see doc/tolerant-v2-pricing.md.", DEFAULT_TOLERANT_V2), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
+    argsman.AddArg("-tolerantpricingmode=<mode>", "How Bitcoin Tolerant V2 prices this node's own block templates (requires -tolerantv2): \"observe\" leaves templates unchanged and logs what would be excluded; \"market\" leaves out chunks that use the witness discount and pay below the reference rate on their true size. Payments and OP_RETURN are never affected, and blocks mined by others are always accepted. (default: observe)", ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-tolerantreferenceblocks", strprintf("Half-life, in blocks, for Bitcoin Tolerant V2's recency-weighted reference rate (default: %u, ~1 hour). A fixed constant, never auto-tuned; see doc/tolerant-v2-pricing.md section 2.", TolerantReferenceRateTracker::DEFAULT_HALF_LIFE_BLOCKS), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-datacarriersize",
                    strprintf("Relay and mine transactions whose data-carrying raw scriptPubKeys in aggregate "
@@ -2003,10 +2004,28 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             return InitError(strprintf(_("-tolerantreferenceblocks must be between 1 and %d (got %d)"),
                 TolerantReferenceRateTracker::MAX_HALF_LIFE_BLOCKS, half_life_blocks));
         }
+        const std::string mode_arg = args.GetArg("-tolerantpricingmode", TolerantPricingModeToString(DEFAULT_TOLERANT_PRICING_MODE));
+        const std::optional<TolerantPricingMode> mode = ParseTolerantPricingMode(mode_arg);
+        if (!mode) {
+            return InitError(strprintf(_("Unknown -tolerantpricingmode '%s' (use observe or market)"), mode_arg));
+        }
         node.tolerant_reference_rate = std::make_unique<TolerantReferenceRateTracker>(half_life_blocks);
         node.tolerant_chain_monitor = std::make_unique<TolerantChainMonitor>(
-            chainman, *Assert(node.mempool), *node.tolerant_reference_rate);
-        validation_signals.RegisterValidationInterface(node.tolerant_chain_monitor.get());
+            chainman, *Assert(node.mempool), *node.tolerant_reference_rate, *mode);
+        {
+            // Load recent history first, so a restarted node prices from the
+            // same blocks as one that never stopped. Ten half-lives leave
+            // 0.1% residual weight; capped at two days to keep startup fast.
+            // cs_main is held across registration so no block connects in
+            // between; a notification already queued for a backfilled block
+            // is ignored as a duplicate.
+            LOCK(::cs_main);
+            const int depth = static_cast<int>(std::min<int64_t>(10 * half_life_blocks, 288));
+            const int loaded = node.tolerant_chain_monitor->Backfill(depth);
+            LogInfo("Bitcoin Tolerant: reference rate loaded from %d recent blocks; template pricing mode: %s\n",
+                    loaded, TolerantPricingModeToString(*mode));
+            validation_signals.RegisterValidationInterface(node.tolerant_chain_monitor.get());
+        }
     }
 
     // ********************************************************* Step 8: start indexers

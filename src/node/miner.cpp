@@ -19,6 +19,7 @@
 #include <node/kernel_notifications.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
+#include <node/tolerant_template.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
 #include <pow.h>
@@ -305,6 +306,10 @@ void BlockAssembler::addChunks()
     selected_transactions.reserve(MAX_CLUSTER_COUNT_LIMIT);
     FeePerWeight chunk_feerate;
 
+    // Bitcoin Tolerant: honest pricing for this template, if the node set it.
+    std::optional<TolerantTemplatePricer> tolerant;
+    if (m_options.tolerant) tolerant.emplace(*m_options.tolerant, m_chainstate, *m_mempool, nHeight);
+
     // This fills selected_transactions
     chunk_feerate = m_mempool->GetBlockBuilderChunk(selected_transactions);
     FeePerVSize chunk_feerate_vsize = ToFeePerVSize(chunk_feerate);
@@ -336,6 +341,10 @@ void BlockAssembler::addChunks()
                 // Give up if we're close to full and haven't succeeded in a while
                 return;
             }
+        } else if (tolerant && !tolerant->AllowChunk(selected_transactions)) {
+            // Priced out, not a sign the block is full: skip the chunk (and
+            // the rest of its cluster) without counting a failure.
+            m_mempool->SkipBuilderChunk();
         } else {
             m_mempool->IncludeBuilderChunk();
 

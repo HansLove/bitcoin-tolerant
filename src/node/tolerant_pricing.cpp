@@ -140,19 +140,27 @@ TolerantPricingResult ComputeTolerantPricing(const TolerantTxAnalysis& analysis,
     r.normal_feerate = CFeeRate(actual_fee, normal);
     r.as_if_feerate = CFeeRate(actual_fee, econ);
 
-    // A hidden subsidy is paying below what recent block space actually cost, on
-    // the transaction's true (economic) footprint. Because reference_rate itself
-    // falls toward the floor in a quiet market, this does not fire on ordinary
-    // low-fee transactions during genuine slack periods (design §2, §8).
-    r.hidden_subsidy = r.as_if_feerate < reference_rate;
-    r.eligible_for_template = actual_fee >= r.required_fee;
+    // A hidden subsidy exists only where the witness discount is actually
+    // being used: the transaction carries discounted data (economic size above
+    // real size) and, priced on its true footprint, pays below what recent
+    // block space cost. A payment or an OP_RETURN that pays little is not
+    // subsidized -- it pays full weight and simply sorts low, like any cheap
+    // transaction. Treating it differently would price data for being data,
+    // not for the space it takes (principle 2). And because reference_rate
+    // falls toward the floor in a quiet market, this does not fire during
+    // genuine slack periods.
+    const bool uses_discount = analysis.economic_vbytes > analysis.tx_vbytes;
+    r.hidden_subsidy = uses_discount && r.as_if_feerate < reference_rate;
+    r.eligible_for_template = !r.hidden_subsidy;
 
     if (analysis.classification == TolerantDataClass::MONETARY) {
         r.reason = "monetary; economic == normal size";
-    } else if (r.eligible_for_template) {
-        r.reason = "pays honest economic rate";
+    } else if (!uses_discount) {
+        r.reason = "pays full weight; no discount used";
+    } else if (r.hidden_subsidy) {
+        r.reason = "pays below the reference rate on its economic size";
     } else {
-        r.reason = "insufficient as-if feerate for economic size";
+        r.reason = "pays the reference rate on its economic size";
     }
     return r;
 }

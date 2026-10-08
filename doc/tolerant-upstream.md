@@ -66,8 +66,9 @@ named after their base: `v32.0-tolerant.1`, `v32.0-tolerant.2`, …
    in the files listed under "Rebase risk".
 4. Build and run the Tolerant tests:
    ```sh
-   build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests
+   build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests,tolerant_template_tests,miner_tests
    build/test/functional/feature_tolerant_pricing.py
+   build/test/functional/feature_tolerant_template.py
    ```
 5. Tag the release once the base tag is final, not a release candidate.
 
@@ -100,7 +101,7 @@ instead of filtering it, so Core's permissive default stands.
 
 | PR | Decision |
 |---|---|
-| #33629, #33591, #34616 Cluster mempool | **Accept, adapt.** Block templates are now built from cluster chunks; `addPackageTxs` no longer exists. Tolerant's Phase 2 (pricing in local templates) must hook into `BlockAssembler::addChunks()`, not the v30 package loop. Phase 1 is unaffected. |
+| #33629, #33591, #34616 Cluster mempool | **Accept, adapt.** Block templates are now built from cluster chunks; `addPackageTxs` no longer exists. Tolerant's Phase 2 hooks into `BlockAssembler::addChunks()` and prices each chunk as a unit, skipping with Core's own `SkipBuilderChunk()`. Done; Phase 2 exists only on the v32 base. |
 | #33453 Undeprecate `-datacarrier` / `-datacarriersize` | Accept. Operators keep the option. Tolerant does not use it to filter (principle 2) and leaves its default alone. |
 | #33892 Allow sub-minrelay transactions in a package when CPFP pays for them | Accept. Judging a package by what it pays in total is consistent with pricing by economic cost. The reference-rate floor is unaffected. |
 | #33199 Fee estimator returns sub-1 sat/vB estimates | Accept. Tolerant's price does not use the fee estimator (principle 3). |

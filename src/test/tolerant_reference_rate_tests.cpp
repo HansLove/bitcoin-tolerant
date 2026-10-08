@@ -6,6 +6,7 @@
 
 #include <node/tolerant_reference_rate.h>
 
+#include <addresstype.h>
 #include <consensus/validation.h>
 #include <key.h>
 #include <node/blockstorage.h>
@@ -140,6 +141,53 @@ BOOST_AUTO_TEST_CASE(single_anomalous_block_is_diluted)
     BOOST_CHECK_LT(after_rate, baseline_rate);
     BOOST_CHECK_GT(after_rate, baseline_rate / 2);
 }
+// ---------------------------------------------------------------------------
+// Reorgs are undone exactly: the result must be bit-identical to a tracker
+// that never saw the disconnected blocks.
+// ---------------------------------------------------------------------------
+BOOST_AUTO_TEST_CASE(reorg_is_undone_exactly)
+{
+    TolerantReferenceRateTracker reorged;
+    TolerantReferenceRateTracker clean;
+    for (int h = 1; h <= 20; ++h) {
+        reorged.AddBlock(h, 10 * 100000, 100000);
+        clean.AddBlock(h, 10 * 100000, 100000);
+    }
+    // The old branch: two blocks at a fee spike...
+    reorged.AddBlock(21, 90 * 100000, 100000);
+    reorged.AddBlock(22, 90 * 100000, 100000);
+    BOOST_CHECK_GT(reorged.GetReferenceRate(FLOOR).GetFeePerK(), clean.GetReferenceRate(FLOOR).GetFeePerK());
+    // ...replaced by a quiet one.
+    reorged.RemoveBlocksFrom(21);
+    BOOST_CHECK(reorged.TipHeight() == 20);
+    for (int h = 21; h <= 23; ++h) {
+        reorged.AddBlock(h, 2 * 100000, 100000);
+        clean.AddBlock(h, 2 * 100000, 100000);
+    }
+    BOOST_CHECK_EQUAL(reorged.BlocksObserved(), clean.BlocksObserved());
+    BOOST_CHECK(reorged.GetReferenceRate(FLOOR) == clean.GetReferenceRate(FLOOR));
+}
+
+BOOST_AUTO_TEST_CASE(duplicates_and_old_heights_are_ignored)
+{
+    TolerantReferenceRateTracker t;
+    BOOST_CHECK(t.AddBlock(100, 10 * 100000, 100000));
+    const CFeeRate before = t.GetReferenceRate(FLOOR);
+    BOOST_CHECK(!t.AddBlock(100, 999 * 100000, 100000)); // same height again
+    BOOST_CHECK(!t.AddBlock(99, 999 * 100000, 100000));  // older
+    BOOST_CHECK_EQUAL(t.BlocksObserved(), 1);
+    BOOST_CHECK(t.GetReferenceRate(FLOOR) == before);
+}
+
+BOOST_AUTO_TEST_CASE(history_is_bounded)
+{
+    TolerantReferenceRateTracker t; // half-life 6 -> window of one retarget period
+    BOOST_CHECK_EQUAL(t.WindowBlocks(), 2016U);
+    for (int h = 1; h <= 2100; ++h) t.AddBlock(h, 10 * 1000, 1000);
+    BOOST_CHECK_EQUAL(t.BlocksObserved(), 2016);
+    BOOST_CHECK_EQUAL(TolerantReferenceRateTracker(500).WindowBlocks(), 5000U);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 // ---------------------------------------------------------------------------
@@ -253,11 +301,21 @@ BOOST_AUTO_TEST_CASE(evaluate_transaction_against_real_chain)
         BOOST_CHECK_EQUAL(v->analysis.economic_vbytes, v->analysis.tx_vbytes);
     }
 
+    // A P2WSH output whose witness script carries an inscription-style
+    // envelope: spending it puts 500 data bytes in the witness, at a discount.
+    const CScript envelope = CScript() << OP_FALSE << OP_IF << std::vector<unsigned char>(500, 0x42)
+                                       << OP_ENDIF << OP_TRUE;
+    const CScript envelope_spk = GetScriptForDestination(WitnessV0ScriptHash(envelope));
+
     // Warm the tracker with real connected blocks carrying a real fee market.
     // Block 101+i spends the coinbase at height i+1: exactly 100 confirmations.
+    // The first block also funds the envelope output.
+    COutPoint envelope_coin;
+    CAmount envelope_value{0};
     for (int i = 0; i < 6; ++i) {
         const CTransaction paying{SpendOf(COutPoint{m_coinbase_txns[i]->GetHash(), 0},
-                                          m_coinbase_txns[i]->vout[0].nValue - 20000, spk)};
+                                          m_coinbase_txns[i]->vout[0].nValue - 20000,
+                                          i == 0 ? envelope_spk : spk)};
         CMutableTransaction signed_tx{paying};
         signed_tx.vin[0].scriptSig = CScript();
         std::vector<unsigned char> sig;
@@ -269,26 +327,50 @@ BOOST_AUTO_TEST_CASE(evaluate_transaction_against_real_chain)
         const CBlockIndex* tip = WITH_LOCK(::cs_main, return m_node.chainman->ActiveChain().Tip());
         BOOST_REQUIRE_EQUAL(tip->GetBlockHash(), block.GetHash());
         monitor.BlockConnected(kernel::ChainstateRole{}, std::make_shared<const CBlock>(block), tip);
+        if (i == 0) {
+            envelope_coin = COutPoint{signed_tx.GetHash(), 0};
+            envelope_value = signed_tx.vout[0].nValue;
+        }
     }
     BOOST_CHECK(monitor.IsReferenceReliable());
     const CFeeRate reference = monitor.GetReferenceRate();
 
-    // Paying well below the realized market rate is now a real verdict...
+    CMutableTransaction envelope_spend;
+    envelope_spend.vin.emplace_back(envelope_coin);
+    envelope_spend.vin[0].scriptWitness.stack.emplace_back(envelope.begin(), envelope.end());
+    envelope_spend.vout.emplace_back(envelope_value - 1000, spk);
+    const CTransaction envelope_tx{envelope_spend};
+
+    // Witness data paying well below the realized market rate on its true
+    // footprint is a hidden subsidy...
     {
-        const auto v = monitor.EvaluateTransaction(op_return_tx, 100);
+        const auto v = monitor.EvaluateTransaction(envelope_tx, 100);
         BOOST_REQUIRE(v);
         BOOST_CHECK(v->reference_reliable);
+        BOOST_CHECK(v->analysis.classification == TolerantDataClass::WITNESS_DATA);
+        BOOST_CHECK_GT(v->analysis.economic_vbytes, v->analysis.tx_vbytes);
         BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "hidden-subsidy");
+        BOOST_CHECK(!v->pricing.eligible_for_template);
     }
     // ...and paying the honest required fee clears it -- data is priced, never banned.
     {
-        const auto probe = monitor.EvaluateTransaction(op_return_tx, 0);
+        const auto probe = monitor.EvaluateTransaction(envelope_tx, 0);
         BOOST_REQUIRE(probe);
-        const auto v = monitor.EvaluateTransaction(op_return_tx, probe->pricing.required_fee);
+        const auto v = monitor.EvaluateTransaction(envelope_tx, probe->pricing.required_fee);
         BOOST_REQUIRE(v);
         BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "honest");
         BOOST_CHECK(v->pricing.eligible_for_template);
         BOOST_CHECK(v->reference_rate == reference);
+    }
+    // A cheap OP_RETURN is NOT a subsidy: it pays full weight and just sorts
+    // low, like any cheap transaction. Excluding it would filter data for
+    // being data (principle 2).
+    {
+        const auto v = monitor.EvaluateTransaction(op_return_tx, 100);
+        BOOST_REQUIRE(v);
+        BOOST_CHECK(v->pricing.as_if_feerate < reference);
+        BOOST_CHECK(!v->pricing.hidden_subsidy);
+        BOOST_CHECK_EQUAL(std::string{v->Verdict()}, "honest");
     }
 
     // An unknown prevout yields no verdict at all -- we never guess.
@@ -296,6 +378,31 @@ BOOST_AUTO_TEST_CASE(evaluate_transaction_against_real_chain)
         const CTransaction orphan{SpendOf(COutPoint{Txid::FromUint256(uint256::ONE), 0}, 1000, spk)};
         BOOST_CHECK(!monitor.EvaluateTransaction(orphan, 1000));
     }
+}
+
+BOOST_AUTO_TEST_CASE(backfill_and_disconnect_on_real_chain)
+{
+    // TestChain100Setup has already connected 100 blocks.
+    TolerantReferenceRateTracker tracker;
+    TolerantChainMonitor monitor(*m_node.chainman, *m_node.mempool, tracker);
+    const CBlockIndex* tip = WITH_LOCK(::cs_main, return m_node.chainman->ActiveChain().Tip());
+    BOOST_REQUIRE_EQUAL(tip->nHeight, 100);
+
+    const int loaded = WITH_LOCK(::cs_main, return monitor.Backfill(60));
+    BOOST_CHECK_EQUAL(loaded, 60);
+    BOOST_CHECK_EQUAL(monitor.BlocksObserved(), 60);
+    BOOST_CHECK(monitor.IsReferenceReliable()); // no warm-up after a restart
+
+    // A queued notification for a block we already backfilled is ignored.
+    CBlock tip_block;
+    BOOST_REQUIRE(m_node.chainman->m_blockman.ReadBlock(tip_block, *tip));
+    monitor.BlockConnected(kernel::ChainstateRole{}, std::make_shared<const CBlock>(tip_block), tip);
+    BOOST_CHECK_EQUAL(monitor.BlocksObserved(), 60);
+
+    // Disconnecting the tip removes exactly that block.
+    monitor.BlockDisconnected(std::make_shared<const CBlock>(tip_block), tip);
+    BOOST_CHECK_EQUAL(monitor.BlocksObserved(), 59);
+    BOOST_CHECK(WITH_LOCK(::cs_main, return tracker.TipHeight()) == 99);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
