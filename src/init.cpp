@@ -65,6 +65,7 @@
 #include <node/mining_args.h>
 #include <node/mining_types.h>
 #include <node/peerman_args.h>
+#include <node/tolerant_defaults.h>
 #include <node/tolerant_reference_rate.h>
 #include <policy/feerate.h>
 #include <policy/fees/block_policy_estimator.h>
@@ -804,6 +805,13 @@ static bool AppInitServers(NodeContext& node)
 // Parameter interaction based on rules
 void InitParameterInteraction(ArgsManager& args)
 {
+    // Bitcoin Tolerant's defaults go first, so Core's own derived defaults
+    // below react to them, and so they behave like operator preferences:
+    // anything the operator sets explicitly still wins (SoftSetArg).
+    for (const std::string& applied : ApplyTolerantDefaults(args)) {
+        LogInfo("parameter interaction: Bitcoin Tolerant default -> setting %s\n", applied);
+    }
+
     // when specifying an explicit binding address, you want to listen on it
     // even when -connect or -proxy is specified
     if (!args.GetArgs("-bind").empty()) {

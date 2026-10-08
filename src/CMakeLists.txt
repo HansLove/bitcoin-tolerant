@@ -239,6 +239,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/psbt.cpp
   node/timeoffsets.cpp
   node/tolerant_datacarrier.cpp
+  node/tolerant_defaults.cpp
   node/tolerant_pricing.cpp
   node/tolerant_reference_rate.cpp
   node/transaction.cpp

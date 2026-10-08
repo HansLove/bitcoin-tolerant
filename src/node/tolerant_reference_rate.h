@@ -153,15 +153,16 @@ struct TolerantMempoolVerdict {
  *
  *  Thread safety: the tracker is only touched under m_mutex, so future
  *  readers (e.g. an RPC) must go through this class, not the tracker. */
-class TolerantChainMonitor : public CValidationInterface
+class TolerantChainMonitor final : public CValidationInterface
 {
 public:
     TolerantChainMonitor(ChainstateManager& chainman, const CTxMemPool& mempool,
                          TolerantReferenceRateTracker& tracker);
 
     void BlockConnected(const kernel::ChainstateRole& role, const std::shared_ptr<const CBlock>& block,
-                        const CBlockIndex* pindex) override;
-    void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence) override;
+                        const CBlockIndex* pindex) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) LOCKS_EXCLUDED(::cs_main);
 
     //! Analyse and price `tx` (paying `fee`) against the current reference
     //! rate, resolving prevouts from the chain tip and the mempool. Returns
@@ -169,7 +170,7 @@ public:
     //! a block that confirmed the tx in the meantime) -- we never guess.
     //! Acquires cs_main and the mempool lock; call without holding either.
     std::optional<TolerantMempoolVerdict> EvaluateTransaction(const CTransaction& tx, CAmount fee) const
-        EXCLUSIVE_LOCKS_REQUIRED(!::cs_main, !m_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) LOCKS_EXCLUDED(::cs_main);
 
     TolerantReferenceSnapshot GetSnapshot() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     CFeeRate GetReferenceRate() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
