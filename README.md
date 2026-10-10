@@ -1,79 +1,122 @@
-Bitcoin Core integration/staging tree
-=====================================
+Bitcoin Tolerant
+================
 
-https://bitcoincore.org
+**Block space has a price.** Bitcoin Tolerant measures it from every confirmed
+block and charges data its real weight. It is an independent Bitcoin node built
+directly on Bitcoin Core v30.3.
 
-For an immediately usable, binary version of the Bitcoin Core software, see
-https://bitcoincore.org/en/download/.
+https://bitcointolerant.com
 
-What is Bitcoin Core?
----------------------
-
-Bitcoin Core connects to the Bitcoin peer-to-peer network to download and fully
-validate blocks and transactions. It also includes a wallet and graphical user
-interface, which can be optionally built.
-
-Further information about Bitcoin Core is available in the [doc folder](/doc).
-
-License
--------
-
-Bitcoin Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
-information or see https://opensource.org/license/MIT.
-
-Development Process
--------------------
-
-The `master` branch is regularly built (see `doc/build-*.md` for instructions) and tested, but it is not guaranteed to be
-completely stable. [Tags](https://github.com/bitcoin/bitcoin/tags) are created
-regularly from release branches to indicate new official, stable release versions of Bitcoin Core.
-
-The https://github.com/bitcoin-core/gui repository is used exclusively for the
-development of the GUI. Its master branch is identical in all monotree
-repositories. Release branches and tags do not exist, so please do not fork
-that repository unless it is for development reasons.
-
-The contribution workflow is described in [CONTRIBUTING.md](CONTRIBUTING.md)
-and useful hints for developers can be found in [doc/developer-notes.md](doc/developer-notes.md).
-
-Testing
--------
-
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
-
-### Automated Testing
-
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled during the generation of the build system) with: `ctest`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
-
-There are also [regression and integration tests](/test), written
-in Python.
-These tests can be run (if the [test dependencies](/test) are installed) with: `build/test/functional/test_runner.py`
-(assuming `build` is your build directory).
-
-The CI (Continuous Integration) systems make sure that every pull request is tested on Windows, Linux, and macOS.
-The CI must pass on all commits before merge to avoid unrelated CI failures on new pull requests.
-
-### Manual Quality Assurance (QA) Testing
-
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
-
-Translations
+What it does
 ------------
 
-Changes to translations as well as new translations can be submitted to
-[Bitcoin Core's Transifex page](https://explore.transifex.com/bitcoin/bitcoin/).
+SegWit counts a witness byte as one weight unit instead of four, a discount
+designed for signatures. Since 2023 the same discount also applies to arbitrary
+files stored in the witness. Bitcoin Tolerant removes that discount for data,
+and only for data. It does not filter content or change consensus.
 
-Translations are periodically pulled from Transifex and merged into the git repository. See the
-[translation process](doc/translation_process.md) for details on how this works.
+```
+reference_rate  = recent block fees / recent block vbytes
+economic_vbytes = real vbytes + witness data bytes × 3/4
+required_fee    = economic_vbytes × reference_rate
+```
 
-**Important**: We do not accept translation changes as GitHub pull requests because the next
-pull from Transifex would automatically overwrite them again.
+- **The price comes from confirmed blocks.** It is read from each block's undo
+  data, never from the local mempool. Recent blocks count most: a block's weight
+  halves every 6 blocks, and fades to nothing over one difficulty period.
+- **Payments are never multiplied.** A monetary transaction's economic size is
+  its real size.
+- **OP_RETURN is never charged twice.** It already pays full weight.
+- **Quiet markets stay cheap.** When nobody competes for space, the price falls
+  to the minimum relay fee for everyone, data included.
+
+Status: **Phase 1, observe.** The node measures every block, gives each
+data-carrying transaction a verdict (`honest` or `hidden-subsidy`), and
+publishes the reference price over RPC and logs. It rejects nothing: relay,
+mempool and mining behave exactly as in Bitcoin Core.
+
+Run it
+------
+
+Bitcoin Tolerant needs the same build tools as Bitcoin Core (a C++ compiler,
+CMake, Boost and libevent). See [`doc/build-osx.md`](doc/build-osx.md),
+[`doc/build-unix.md`](doc/build-unix.md) or
+[`doc/build-windows.md`](doc/build-windows.md).
+
+```sh
+git clone https://github.com/HansLove/bitcoin-tolerant.git && cd bitcoin-tolerant
+cmake -B build -DENABLE_IPC=OFF
+cmake --build build
+build/bin/bitcoind -tolerantv2=1 -debug=tolerant
+build/bin/bitcoin-cli gettolerantpricing
+build/bin/bitcoin-cli gettolerantpricing <mempool txid>
+```
+
+`-DENABLE_IPC=OFF` skips the optional Cap'n Proto dependency.
+
+| Option | Default | |
+|---|---|---|
+| `-tolerantv2` | `0` | Enables Bitcoin Tolerant pricing. With `0`, the node is plain Bitcoin Core. |
+| `-tolerantreferenceblocks` | `6` | Half-life of the reference rate, in blocks (1–2016). |
+| `-debug=tolerant` | off | Logs each block's rate and each data transaction's verdict. |
+
+How it differs
+--------------
+
+| | Bitcoin Core v30 | Bitcoin Knots | Bitcoin Tolerant |
+|---|---|---|---|
+| Arbitrary data | Relayed, with the witness discount | Filtered | Priced at real weight |
+| Basis | Permissive | Content judgment | Economic cost only |
+| Quiet market | Cheap | Still filtered | Cheap, no penalty |
+| Price visible | No | No | Yes, over RPC and logs |
+
+Outside its reach
+-----------------
+
+Bitcoin Tolerant never changes consensus rules or chain selection, never rejects
+a valid block, and never filters by what data means.
+
+Design and code
+---------------
+
+- Design: [`doc/tolerant-v2-pricing.md`](doc/tolerant-v2-pricing.md)
+- Detection: `src/node/tolerant_datacarrier.{h,cpp}`
+- Pricing: `src/node/tolerant_pricing.{h,cpp}`
+- Reference rate and chain monitor: `src/node/tolerant_reference_rate.{h,cpp}`
+- RPC: `src/rpc/tolerant.cpp`
+
+All Tolerant logic lives in its own files. Bitcoin Core's files carry only
+wiring, so upstream releases merge with little friction.
+
+Tests:
+
+```sh
+build/bin/test_bitcoin --run_test=tolerant_pricing_tests,tolerant_reference_rate_tests
+build/test/functional/feature_tolerant_pricing.py
+```
+
+Branches
+--------
+
+| Branch | Base |
+|---|---|
+| `tolerant-core` | Bitcoin Core v30.3 (stable, default) |
+| `tolerant-core-v32` | Bitcoin Core v32.0 release candidate, with Phase 2 work |
+
+Upstream and license
+--------------------
+
+Bitcoin Tolerant is an independent project built on
+[Bitcoin Core](https://github.com/bitcoin/bitcoin) and tracks its releases. It is
+not affiliated with or endorsed by Bitcoin Core or its maintainers. Everything
+outside the Tolerant files above is Bitcoin Core; see `doc/` for its
+documentation and [`CONTRIBUTING.md`](CONTRIBUTING.md) for its development
+process.
+
+Released under the MIT license. See [COPYING](COPYING).
+
+Support
+-------
+
+Bitcoin Tolerant is independent and unfunded. Donations:
+`bc1q6n0h05956f4hlnwdppptjh6aj8wemymyns7r5c`
