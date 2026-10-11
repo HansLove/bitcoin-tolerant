@@ -44,7 +44,7 @@ CMake, Boost and libevent). See [`doc/build-osx.md`](doc/build-osx.md),
 [`doc/build-windows.md`](doc/build-windows.md).
 
 ```sh
-git clone https://github.com/HansLove/bitcoin-tolerant.git && cd bitcoin-tolerant
+git clone -b tolerant-core https://github.com/HansLove/bitcoin-tolerant.git && cd bitcoin-tolerant
 cmake -B build -DENABLE_IPC=OFF
 cmake --build build
 build/bin/bitcoind -tolerantv2=1 -debug=tolerant
@@ -91,7 +91,7 @@ wiring, so upstream releases merge with little friction.
 Tests:
 
 ```sh
-build/bin/test_bitcoin --run_test=tolerant_pricing_tests,tolerant_reference_rate_tests
+build/bin/test_bitcoin --run_test=tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_tests_chain
 build/test/functional/feature_tolerant_pricing.py
 ```
 
