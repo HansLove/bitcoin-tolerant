@@ -27,6 +27,7 @@
 
 #include <coins.h>
 #include <consensus/amount.h>
+#include <kernel/cs_main.h>
 #include <kernel/mempool_entry.h>
 #include <node/tolerant_pricing.h>
 #include <policy/feerate.h>
@@ -34,32 +35,10 @@
 
 #include <cstdint>
 #include <optional>
-#include <string_view>
 #include <vector>
 
 class Chainstate;
 class TolerantChainMonitor;
-
-enum class TolerantPricingMode {
-    OBSERVE, //!< Templates unchanged; would-be exclusions are counted and logged.
-    MARKET,  //!< Hidden-subsidy chunks are left out of local templates.
-};
-static constexpr TolerantPricingMode DEFAULT_TOLERANT_PRICING_MODE{TolerantPricingMode::OBSERVE};
-
-std::optional<TolerantPricingMode> ParseTolerantPricingMode(std::string_view mode);
-const char* TolerantPricingModeToString(TolerantPricingMode mode);
-
-/** What one template build did. */
-struct TolerantTemplateStats {
-    int height{0};
-    TolerantPricingMode mode{DEFAULT_TOLERANT_PRICING_MODE};
-    bool reference_reliable{false};
-    CFeeRate reference_rate;
-    int chunks_flagged{0};   //!< Hidden-subsidy chunks seen.
-    int txs_flagged{0};
-    CAmount fees_flagged{0}; //!< Their fees: what excluding them gives up.
-    bool applied{false};     //!< True if the flagged chunks were excluded.
-};
 
 /** Pricing for one honest-chunk evaluation. Pure. */
 struct TolerantChunkVerdict {
@@ -91,7 +70,8 @@ public:
 
     //! Whether Core may include this chunk. False only in MARKET mode, with a
     //! reliable reference rate, for a hidden-subsidy chunk.
-    bool AllowChunk(const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk);
+    bool AllowChunk(const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk)
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, m_mempool.cs);
 
 private:
     TolerantChainMonitor& m_monitor;

@@ -66,7 +66,7 @@ named after their base: `v32.0-tolerant.1`, `v32.0-tolerant.2`, …
    in the files listed under "Rebase risk".
 4. Build and run the Tolerant tests:
    ```sh
-   build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests,tolerant_template_tests,miner_tests
+   build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_tests_chain,tolerant_template_tests,miner_tests
    build/test/functional/feature_tolerant_pricing.py
    build/test/functional/feature_tolerant_template.py
    ```

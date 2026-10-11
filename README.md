@@ -81,7 +81,7 @@ reviewed with `contrib/tolerant/upstream-review.sh` before Tolerant moves to it.
 Tests:
 
 ```sh
-build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_chain_tests,tolerant_template_tests
+build/bin/test_bitcoin --run_test=tolerant_defaults_tests,tolerant_pricing_tests,tolerant_reference_rate_tests,tolerant_reference_rate_tests_chain,tolerant_template_tests
 build/test/functional/feature_tolerant_pricing.py
 build/test/functional/feature_tolerant_template.py
 ```

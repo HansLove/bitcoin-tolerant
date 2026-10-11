@@ -11,22 +11,6 @@
 #include <sync.h>
 #include <validation.h>
 
-std::optional<TolerantPricingMode> ParseTolerantPricingMode(std::string_view mode)
-{
-    if (mode == "observe") return TolerantPricingMode::OBSERVE;
-    if (mode == "market") return TolerantPricingMode::MARKET;
-    return std::nullopt;
-}
-
-const char* TolerantPricingModeToString(TolerantPricingMode mode)
-{
-    switch (mode) {
-    case TolerantPricingMode::OBSERVE: return "observe";
-    case TolerantPricingMode::MARKET:  return "market";
-    }
-    return "unknown";
-}
-
 TolerantChunkVerdict EvaluateTolerantChunk(const std::vector<std::pair<TolerantTxAnalysis, CAmount>>& txs,
                                            const CFeeRate& reference_rate)
 {
