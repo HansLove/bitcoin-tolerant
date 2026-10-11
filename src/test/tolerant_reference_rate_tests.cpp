@@ -148,7 +148,7 @@ BOOST_AUTO_TEST_SUITE_END()
 // reference rate is read from CONFIRMED blocks via undo data, never from the
 // local mempool -- see the "filtered-lens problem" in the module comment.
 // ---------------------------------------------------------------------------
-BOOST_FIXTURE_TEST_SUITE(tolerant_reference_rate_chain_tests, TestChain100Setup)
+BOOST_FIXTURE_TEST_SUITE(tolerant_reference_rate_tests_chain, TestChain100Setup)
 
 BOOST_AUTO_TEST_CASE(real_connected_block_totals)
 {
