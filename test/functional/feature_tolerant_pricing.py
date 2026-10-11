@@ -51,12 +51,17 @@ class TolerantPricingTest(BitcoinTestFramework):
         # Independent nodes: node1 only exists to check the disabled path.
         self.setup_nodes()
 
+    def sync_validation(self):
+        # The pricing monitor learns about blocks through the asynchronous validation
+        # interface; wait for it before reading the price.
+        self.nodes[0].syncwithvalidationinterfacequeue()
+
     def fund_envelope_output(self, node, witness_script, amount):
         address = script_to_p2wsh(witness_script)
         txid = node.sendtoaddress(address, amount)
         tx = node.getrawtransaction(txid, True)
         vout = next(o["n"] for o in tx["vout"] if o["scriptPubKey"].get("address") == address)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.generate(node, 1, sync_fun=self.sync_validation)
         return COutPoint(int(txid, 16), vout)
 
     def spend_envelope(self, node, outpoint, amount, witness_script, fee_sat):
@@ -76,11 +81,11 @@ class TolerantPricingTest(BitcoinTestFramework):
         assert_raises_rpc_error(-1, "Bitcoin Tolerant V2 is disabled", self.nodes[1].gettolerantpricing)
 
         self.log.info("Reference rate warms up from confirmed blocks, floored at minrelaytxfee")
-        self.generate(node, 3, sync_fun=self.no_op)
+        self.generate(node, 3, sync_fun=self.sync_validation)
         info = node.gettolerantpricing()
         assert_equal(info["reliable"], False)
         assert_equal(info["half_life_blocks"], 6)
-        self.generate(node, 107, sync_fun=self.no_op)
+        self.generate(node, 107, sync_fun=self.sync_validation)
         info = node.gettolerantpricing()
         assert_equal(info["reliable"], True)
         assert_equal(info["blocks_observed"], 110)
@@ -105,7 +110,7 @@ class TolerantPricingTest(BitcoinTestFramework):
         assert_equal(p["classification"], "OP_RETURN_DATA")
         assert_equal(p["economic_vsize"], p["vsize"])
         assert_greater_than(p["data_bytes"], 200)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.generate(node, 1, sync_fun=self.sync_validation)
 
         self.log.info("Witness envelope loses the discount")
         witness_script = CScript([OP_0, OP_IF, b"\x42" * ENVELOPE_PAYLOAD, OP_ENDIF, OP_1])
@@ -138,7 +143,7 @@ class TolerantPricingTest(BitcoinTestFramework):
 
         self.log.info("The verdicts reach the log")
         with node.assert_debug_log(expected_msgs=["[TolerantV2] block", "-> reference_rate="]):
-            self.generate(node, 1, sync_fun=self.no_op)
+            self.generate(node, 1, sync_fun=self.sync_validation)
 
 
 if __name__ == "__main__":
