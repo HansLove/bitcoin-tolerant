@@ -27,7 +27,9 @@
 #include <policy/policy.h> // for DUST_RELAY_TX_FEE
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 class CCoinsViewCache;
 class CTransaction;
@@ -115,5 +117,29 @@ TolerantTxAnalysis AnalyzeTolerantTx(const CTransaction& tx, const CCoinsViewCac
 TolerantPricingResult ComputeTolerantPricing(const TolerantTxAnalysis& analysis,
                                              CAmount actual_fee,
                                              const CFeeRate& reference_rate);
+
+/** How this node prices its own block templates (Phase 2). The template
+ *  pricer lives in node/tolerant_template.h; the mode and per-template stats
+ *  live here so the chain monitor can hold them without depending on it. */
+enum class TolerantPricingMode {
+    OBSERVE, //!< Templates unchanged; would-be exclusions are counted and logged.
+    MARKET,  //!< Hidden-subsidy chunks are left out of local templates.
+};
+static constexpr TolerantPricingMode DEFAULT_TOLERANT_PRICING_MODE{TolerantPricingMode::OBSERVE};
+
+std::optional<TolerantPricingMode> ParseTolerantPricingMode(std::string_view mode);
+const char* TolerantPricingModeToString(TolerantPricingMode mode);
+
+/** What one template build did. */
+struct TolerantTemplateStats {
+    int height{0};
+    TolerantPricingMode mode{DEFAULT_TOLERANT_PRICING_MODE};
+    bool reference_reliable{false};
+    CFeeRate reference_rate;
+    int chunks_flagged{0};   //!< Hidden-subsidy chunks seen.
+    int txs_flagged{0};
+    CAmount fees_flagged{0}; //!< Their fees: what excluding them gives up.
+    bool applied{false};     //!< True if the flagged chunks were excluded.
+};
 
 #endif // BITCOIN_NODE_TOLERANT_PRICING_H

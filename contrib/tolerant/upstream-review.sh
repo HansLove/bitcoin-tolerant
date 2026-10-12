@@ -15,6 +15,7 @@
 #   4. Rebase risk: Core files Tolerant wires into that upstream also changed
 # See doc/tolerant-upstream.md for the principles and the triage these feed.
 
+export LC_ALL=C.UTF-8
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
@@ -65,6 +66,12 @@ prs_touching() {
     git rev-list --no-merges "$OLD..$NEW" -- $1 | while read -r c; do
         git log --merges --ancestry-path --format='%s' "$c..$NEW" | tail -1
     done | to_pr_lines
+}
+
+# Prefix every input line with $1 (e.g. a Markdown list marker).
+prefix_lines() {
+    local prefix=$1 line
+    while IFS= read -r line; do printf '%s%s\n' "$prefix" "$line"; done
 }
 
 to_pr_lines() {
@@ -126,11 +133,11 @@ else
     n_other=$(printf '%s' "$other" | grep -c . || true)
     echo "**Flagged ($n_flag):** read these. Data, standardness and relay-fee PRs from anywhere in the release; package, RBF, cluster and block-template PRs that touch watched files."
     echo
-    [ -n "$flagged" ] && echo "$flagged" | sed 's/^/- [ ] /'
+    [ -n "$flagged" ] && echo "$flagged" | prefix_lines "- [ ] "
     echo
     echo "<details><summary>Other PRs touching watched files ($n_other) — usually refactors</summary>"
     echo
-    [ -n "$other" ] && echo "$other" | sed 's/^/- /'
+    [ -n "$other" ] && echo "$other" | prefix_lines "- "
     echo
     echo "</details>"
 fi
@@ -144,7 +151,7 @@ n_tooling=$(echo "$consensus_prs" | grep -cE "$TOOLING_RE" || true)
 if [ -z "$behavior" ]; then
     echo "None."
 else
-    echo "$behavior" | sed 's/^/- /'
+    echo "$behavior" | prefix_lines "- "
 fi
 [ "$n_tooling" -gt 0 ] && echo && echo "Plus $n_tooling CI, include-what-you-use or docs PRs touching consensus files."
 echo
@@ -163,5 +170,5 @@ if [ -z "$risk" ]; then
 else
     echo "Core files Tolerant modifies that also changed upstream (expect conflicts here):"
     echo
-    echo "$risk" | sed 's/^/- `/; s/$/`/'
+    while IFS= read -r f; do printf -- "- \`%s\`\n" "$f"; done <<< "$risk"
 fi

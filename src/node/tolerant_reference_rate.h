@@ -38,7 +38,6 @@
 #include <kernel/types.h> // kernel::ChainstateRole
 #include <kernel/cs_main.h>
 #include <node/tolerant_pricing.h>
-#include <node/tolerant_template.h>
 #include <policy/feerate.h>
 #include <sync.h>
 #include <validationinterface.h>

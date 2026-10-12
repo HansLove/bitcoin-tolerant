@@ -164,3 +164,19 @@ TolerantPricingResult ComputeTolerantPricing(const TolerantTxAnalysis& analysis,
     }
     return r;
 }
+
+std::optional<TolerantPricingMode> ParseTolerantPricingMode(std::string_view mode)
+{
+    if (mode == "observe") return TolerantPricingMode::OBSERVE;
+    if (mode == "market") return TolerantPricingMode::MARKET;
+    return std::nullopt;
+}
+
+const char* TolerantPricingModeToString(TolerantPricingMode mode)
+{
+    switch (mode) {
+    case TolerantPricingMode::OBSERVE: return "observe";
+    case TolerantPricingMode::MARKET:  return "market";
+    }
+    return "unknown";
+}
