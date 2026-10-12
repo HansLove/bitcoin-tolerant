@@ -69,9 +69,11 @@ public:
     TolerantTemplatePricer& operator=(const TolerantTemplatePricer&) = delete;
 
     //! Whether Core may include this chunk. False only in MARKET mode, with a
-    //! reliable reference rate, for a hidden-subsidy chunk.
-    bool AllowChunk(const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk)
-        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, m_mempool.cs);
+    //! reliable reference rate, for a hidden-subsidy chunk. `mempool` is the
+    //! one this pricer was built with; passing it lets the caller's lock
+    //! annotation name the same mutex.
+    bool AllowChunk(const CTxMemPool& mempool, const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk)
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, mempool.cs);
 
 private:
     TolerantChainMonitor& m_monitor;

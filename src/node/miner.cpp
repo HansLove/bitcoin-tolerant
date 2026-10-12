@@ -341,7 +341,7 @@ void BlockAssembler::addChunks()
                 // Give up if we're close to full and haven't succeeded in a while
                 return;
             }
-        } else if (tolerant && !tolerant->AllowChunk(selected_transactions)) {
+        } else if (tolerant && !tolerant->AllowChunk(*m_mempool, selected_transactions)) {
             // Priced out, not a sign the block is full: skip the chunk (and
             // the rest of its cluster) without counting a failure.
             m_mempool->SkipBuilderChunk();

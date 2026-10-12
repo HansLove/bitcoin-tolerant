@@ -145,12 +145,13 @@ void TolerantChainMonitor::BlockConnected(const kernel::ChainstateRole& role, co
     // order relative to the tip; only the chainstate that follows the tip
     // describes the current fee market.
     if (role.historical) return;
+    // The genesis block has no undo data and no fee market; skip it before
+    // ReadBlockUndo logs an error for the missing file.
+    if (pindex->nHeight == 0) return;
 
     CBlockUndo undo;
     if (!m_chainman.m_blockman.ReadBlockUndo(undo, *pindex)) {
-        // No undo data (e.g. pruned, or the genesis block, which has no
-        // spendable inputs and never carries fee-market data). Skip rather
-        // than guess.
+        // No undo data (e.g. pruned). Skip rather than guess.
         return;
     }
 

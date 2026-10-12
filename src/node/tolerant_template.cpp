@@ -9,6 +9,7 @@
 #include <policy/policy.h> // GetVirtualTransactionSize
 #include <primitives/transaction.h>
 #include <sync.h>
+#include <util/check.h>
 #include <validation.h>
 
 TolerantChunkVerdict EvaluateTolerantChunk(const std::vector<std::pair<TolerantTxAnalysis, CAmount>>& txs,
@@ -58,10 +59,11 @@ TolerantTemplatePricer::~TolerantTemplatePricer()
     m_monitor.RecordTemplate(m_stats);
 }
 
-bool TolerantTemplatePricer::AllowChunk(const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk)
+bool TolerantTemplatePricer::AllowChunk(const CTxMemPool& mempool, const std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& chunk)
 {
     AssertLockHeld(::cs_main);
-    AssertLockHeld(m_mempool.cs);
+    AssertLockHeld(mempool.cs);
+    Assume(&mempool == &m_mempool);
 
     std::vector<std::pair<TolerantTxAnalysis, CAmount>> priced;
     priced.reserve(chunk.size());
